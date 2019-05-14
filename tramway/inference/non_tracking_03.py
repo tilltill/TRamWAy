@@ -73,7 +73,10 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
                                    minlnL=method['minlnL'],
                                    global_inference = global_inference,
                                    verbose=method['verbose'])
-    inferrer.infer()
+    try:
+        inferrer.infer()
+    except (SystemExit, KeyboardInterrupt):
+        pass
     return inferrer._final_diffusivities
 
 
@@ -83,6 +86,10 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
     The handling of particle count and drs distance matrices is not very pleasing yet
     drift management is horrendously confusing in the argument passing of the optimizer
 '''
+
+class FunctionEvaluation(Exception):
+    def __init__(self, message):
+        self.message = "Couldn't evaluate the function"
 
 
 def Lq(x,q=1):
@@ -99,6 +106,7 @@ def Lq(x,q=1):
     else:
         raise ValueError(f"q={q} is out of bounds.")
 
+
 def expq(y,q=1):
     """
         Implements the inverse $L_q$ function
@@ -107,12 +115,13 @@ def expq(y,q=1):
     :return: The value of the inverse $L_q$ function
     """
     if q == 1:
-        return exp(x)
+        return exp(y)
     elif 0 < q < 1:
         p = 1 / (1-q) # the conjugate of q, i.e the number such that (1/p + 1/q = 1)
         return (y/p + 1) ** p
     else:
         raise ValueError(f"q={q} is out of bounds.")
+
 
 def logdotexp(a, b):
     """
@@ -131,7 +140,7 @@ def logdotexp(a, b):
     c += max_a + max_b
     return c
 
-# Forebear
+
 class NonTrackingInferrer:
 
     def __init__(self, cells, dt, gamma=0.8, smoothing_factor=0, optimizer='NM', tol=1e-3, epsilon=1e-8, maxiter=10000,
@@ -256,22 +265,22 @@ class NonTrackingInferrer:
         if self._chemPot == 'None' or self._chemPot == 'PhanPot':
             assert (self._phantom_particles is True)
         if self._chemPot == 'PhanPot':
-            self.vprint(1, color.BOLD + f"Warning: PhanPot mode is experimental" + color.BOLD)
+            self.vprint(1, f"Warning: PhanPot mode is experimental")
         if self._distribution != 'gaussian' and self._distribution != 'rayleigh':
             raise ValueError("distribution not supported")
         if self._messages_type == 'JB':
             assert(self._method == 'BP')
             assert(self._chemPot == 'None')
             assert(self._phantom_particles is True)
-            self.vprint(1, color.BOLD + f"Warning: JB method is numerically unbstable"+ color.BOLD)
+            self.vprint(1, f"Warning: JB method is numerically unbstable")
         if self._inference_mode == 'DD':
             assert(self._scheme == '1D')
             assert(self._parallel is False)
         if self._useLq is True:
             assert(0 < self._q < 1)
-            self.vprint(1, color.BOLD + f"Warning: Lq method is numerically unstable"+ color.BOLD)
+            self.vprint(1, f"Warning: Lq method is numerically unstable")
         if self._global is True:
-            self.vprint(1, color.BOLD + f"Warning: global mode is experimental" + color.BOLD)
+            self.vprint(1, f"Warning: global mode is experimental")
             assert(self._method=='BP')
         if self._cutoff_low_Pij is True:
             assert(self._minlnL < self._cutoff_log_threshold)
@@ -451,29 +460,37 @@ class NonTrackingInferrer:
                 "chemPot or messages_type not valid. Suggestion: Select chemPot='None' and messages_type='CLV'.")
 
         #import pdb; pdb.set_trace()
-        if self._optimizer == 'NM':
-            if self._inference_mode == 'D':
-                fit = minimize(local_inferrer.smoothed_posterior, x0=D, method='Nelder-Mead', tol=self._tol,
-                               options={'disp': True})
-            elif self._inference_mode == 'DD':
-                start = np.hstack((D,d))
-                fit = minimize(local_inferrer.smoothed_posterior, x0=start, method='Nelder-Mead', tol=self._tol,
-                               options={'disp': True})
-                if self._scheme == '1D':
-                    drift_in = (fit.x)[1:3]
-                elif self._scheme == '2D':
-                    drift_in = (fit.x)[2:4]
-                else:
-                    raise ValueError("Wrong scheme. Choose 1D or 2D")
-        else:
-            raise ValueError("This optimizer is not supported. Suggestion: Choose 'NM'. ")
-        D_in = abs((fit.x)[0])
+        try:
+            if self._optimizer == 'NM':
+                if self._inference_mode == 'D':
+                    fit = minimize(local_inferrer.smoothed_posterior, x0=D, method='Nelder-Mead', tol=self._tol,
+                                       options={'disp': False, 'maxiter': 50, 'xatol': 1e-2, 'fatol': 1e-2})
+                elif self._inference_mode == 'DD':
+                    start = np.hstack((D,d))
+                    fit = minimize(local_inferrer.smoothed_posterior, x0=start, method='Nelder-Mead', tol=self._tol,
+                                   options={'disp': True})
+                    if self._scheme == '1D':
+                        drift_in = (fit.x)[1:3]
+                    elif self._scheme == '2D':
+                        drift_in = (fit.x)[2:4]
+                    else:
+                        raise ValueError("Wrong scheme. Choose 1D or 2D")
+                if local_inferrer.maxiter_attained_counter > 0:
+                    self.vprint(3, f"Warning: maxiter={self._maxiter} attained {local_inferrer.maxiter_attained_counter} times during the optimization.")
+                    self.vprint(3, f"Suggestions: Increase gamma. Choose a more robust method.")
+            else:
+                raise ValueError("This optimizer is not supported. Suggestion: Choose 'NM'. ")
+            D_in = abs((fit.x)[0])
+            self.vprint(2, f"fit = {fit}")
+        except FunctionEvaluation as error:
+            self.vprint(1, f"Warning: Function Evaluation failed.")
+            D_in = np.nan
+            drift_in = np.array([np.nan,np.nan])
         #import pdb; pdb.set_trace()
         ''' Remark: Nelder-Mead does not have positivity constraints for D_in, so we might find a negative value.
             'smoothedPosterior' is implemented to be symmetric, so we should still find the optimum.
         '''
 
-        self.vprint(1, f"fit = {fit}")
         # D_i_ub=max([1.5*(D_i-s2/dt),0.])
         # print("D corrected for motion blur and localization error:", D_i_ub)
         self.vprint(1, f"\nCell no.: {i}")
@@ -890,6 +907,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         else:
             posterior = mlnL + self.smoothing_prior()
         self.vprint(3, f"{posterior}")
+        if posterior is np.nan:
+            raise FunctionEvaluation()
 
         self.optimizer_first_iteration = False
         #import pdb; pdb.set_trace()
@@ -1023,14 +1042,23 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
         # Bethe = [F_BP_old]
+        #self.vprint(4,"")
         for n in range(self._maxiter):
             hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
             hij = (1. - self._gamma) * hij_new + self._gamma * hij_old
             hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
             # Stopping condition:
             F_BP = self.bethe_free_energy(hij, hji, Q)
-            if abs(F_BP - F_BP_old) < self._epsilon:
-                break
+            self.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old-hij_new)}\r", end_="")
+            if F_BP is np.nan or F_BP == np.inf:
+                raise FunctionEvaluation(f"Bethe energy got value F_BP={F_BP}")
+            try:
+                if abs(F_BP - F_BP_old) < self._epsilon:
+                    self.vprint(4,"")
+                    break
+            except RuntimeWarning:
+                #pass
+                import pdb; pdb.set_trace()
             # Update old values of energy and messages:
             F_BP_old = F_BP
             hij_old = hij
@@ -1616,6 +1644,8 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
             self._hji[f] = [None] * (M+1)
 
         self.optimizer_first_iteration = True
+        self.global_update_rule_bis = False
+        self.maxiter_attained_counter = 0
 
     def create_global_indices(self):
         """
