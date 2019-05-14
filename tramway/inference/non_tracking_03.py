@@ -15,7 +15,10 @@ import inspect
 import multiprocessing as mp
 import sys
 import timeit
+#from tqdm import tqdm
 from matplotlib import pylab as plt
+import warnings
+warnings.simplefilter("error")
 
 setup = {
     'infer': 'non_tracking_03',
@@ -579,25 +582,6 @@ class NonTrackingInferrer:
             dr_ij[1, i] = frame2[:, 1] - frame1[i, 1]
         return dr_ij
 
-    def p_m(self, x, Delta, N):
-        '''Poissonian probability for x particles to appear between frames given Delta=M-N
-        and blinking parameters mu_on and mu_off. Consult the article for reference'''
-        mu_off = N * self._p_off
-        return (self._mu_on * mu_off) ** (x - Delta / 2.) / (
-                g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._mu_on * mu_off)))
-
-    def lnp_m(self, x, Delta, N):
-        """
-            The logarithm of `p_m`
-        :param x:
-        :param Delta:
-        :param N:
-        :return:
-        """
-        mu_off = N * self._p_off
-        return log(self._mu_on * mu_off)*(x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
-                - log(iv(Delta, 2 * sqrt(self._mu_on * mu_off)))
-
     def vprint(self, level, string, end_='\n'):
         if self._verbose == 0:
             pass
@@ -724,6 +708,25 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             particle_number[j, :] = N_j
 
         return particle_number
+
+    def p_m(self, x, Delta, N):
+        '''Poissonian probability for x particles to appear between frames given Delta=M-N
+        and blinking parameters mu_on and mu_off. Consult the article for reference'''
+        mu_off = N * self._p_off
+        return (self._region_mu_on * mu_off) ** (x - Delta / 2.) / (
+                g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
+
+    def lnp_m(self, x, Delta, N):
+        """
+            The logarithm of `p_m`
+        :param x: The value of which we want to evaluate the probability
+        :param Delta: The obseved particle number difference
+        :param N: The number of particles in the first frame
+        :return:
+        """
+        mu_off = N * self._p_off
+        return log(self._region_mu_on * mu_off)*(x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+                - log(iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
 
     def lnp_ij(self, dr, frame_index):
         """
@@ -997,6 +1000,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :param Q: matrix of log-probabilities
         :return: Bethe free energy approximation
         """
+        start = timeit.default_timer()
         # Naive version
         '''
         naive_energy = + sum(log(1. + exp(Q + hij + hji))) \
@@ -1008,7 +1012,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         logsumexp_energy = + sum(np.logaddexp(0,Q + self._temperature*hij + self._temperature*hji)) \
                            - sum(logsumexp(Q + self._temperature*hji, axis=1)) \
                            - sum(logsumexp(Q + self._temperature*hij, axis=0))
-
+        #self.vprint(4,f"Bethe time \t\t= {(timeit.default_timer()-start)*1000} ms")
         return logsumexp_energy/self._temperature
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
@@ -1080,13 +1084,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :param M: The number of particles in the second frame (not including phantom particles)
         :return: F_BP the Bethe free energy approximation
         """
-        #self.vprint(3, f"call: sum_product_energy")
         # If a single particle has been recorded in each frame and tracers are permanent, the link is known:
         if (N == 1) & (n_off == 0) & (n_on == 0) & (M == 1):
             F_BP = -self.minus_lq_minus_lnp_ij(dr, frame_index)
         # Else, perform BP to obtain the Bethe free energy:
         else:
-            # bool_array = self.boolean_matrix(n_off + M)
             if (self.optimizer_first_iteration is False) and (self._hij_init_takeLast is True):
                 hij = self.get_hij(frame_index, n_on)
                 hji = self.get_hji(frame_index, n_on)
@@ -1726,21 +1728,22 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
         # Bethe = [F_BP_old]
-        self.vprint(4,"")
+        #self.vprint(4,"")
         #assert(self._temperature==1) # not putting a temperature in the implementation leads to a speed-up of around 25%
         boolean_matrix = self.boolean_matrix(Q.shape[0])
         for n in range(self._maxiter):
+            force_global = False
             if self._sparse_energy_computation is True:
                 for j in range(self._sparse_energy_computation_sparsity):
                     start = timeit.default_timer()
-                    hij_new, hji_new = self.sum_product_update_rule_chooser(Q, hij, hji, frame_index)
+                    hij_new, hji_new = self.sum_product_update_rule_chooser(Q, hij, hji, frame_index, force_global)
                     hij = (1. - self._gamma) * hij_new + self._gamma * hij_old
                     hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
                     hij_old = hij
                     hji_old = hji
                     #self.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
             else:
-                hij_new, hji_new = self.sum_product_update_rule_chooser(Q, hij, hji, frame_index)
+                hij_new, hji_new = self.sum_product_update_rule_chooser(Q, hij, hji, frame_index, force_global)
                 hij = (1. - self._gamma) * hij_new + self._gamma * hij_old
                 hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
             # Stopping condition Bethe free energy:
@@ -1753,6 +1756,8 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
             if abs(F_BP - F_BP_old) < self._epsilon:
                 self.vprint(4,"")
                 break
+            if F_BP is np.nan:
+                raise FunctionEvaluation(f"Bethe energy got value nan")
             # Update old values of energy and messages:
             F_BP_old = F_BP
             hij_old = hij
@@ -1789,11 +1794,13 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         # print(f"n={n}") # the number of iterations
         return F_BP
 
-    def sum_product_update_rule_chooser(self, Q, hij_old, hji_old, frame_index):
-        if self.optimizer_first_iteration is True:
+    def sum_product_update_rule_chooser(self, Q, hij_old, hji_old, frame_index, force_global=False):
+        if self.optimizer_first_iteration is True or force_global is True:
             return self.sum_product_update_rule(Q, hij_old, hji_old)
-        elif self.optimizer_first_iteration is False:
+        elif self.optimizer_first_iteration is False and self.global_update_rule_bis is False:
             return self.sum_product_update_rule_local(Q, hij_old, hji_old, frame_index)
+        elif self.optimizer_first_iteration is False and self.global_update_rule_bis is True:
+            return self.sum_product_update_rule_local_bis(Q, hij_old, hji_old, frame_index)
         else:
             raise ValueError(f"self.optimizer_first_iteration is neither True nor False")
 
@@ -1812,12 +1819,12 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         :param hji_old: Old right messages
         :return: The new messages (undamped)
         """
-        start = timeit.default_timer()
-        N_local = self.particle_count_local[self._local_indices, frame_index]
-        M_local = self.particle_count_local[self._local_indices, frame_index+1]
+
+        N_local = sum(self._particle_count[self._local_indices, frame_index]).astype(int)
+        M_local = sum(self._particle_count[self._local_indices, frame_index+1]).astype(int)
         # TODO: 1) O(n) implementation by diluting long edges
         #       2) --> **Implementation keeping faraway messages constant**
-
+        start = timeit.default_timer()
         # Hij
         A = exp(Q + self._temperature*hji_old)
         A11 = A[0:N_local,0:M_local]
@@ -1839,7 +1846,51 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
 
         #hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
         #hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
-        #self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
+        self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
         # logdotexp update
         #hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
         return hij_new, hji_new
+
+    def sum_product_update_rule_local_bis(self, Q, hij_old, hji_old, frame_index):
+        """
+            We use a block-matrix decomposition, with A = exp(Q+Hij) and B = boolean matrix
+                _(M)    _         _(M)    _        _(M)    _
+            (N)| A11 A12 | x  (M)| B11 B12 | = (N)| C11 C12 |
+               |_A21 A22_|       |_B21 B22_|      |_C21 C22_|
+
+            We update C11, C12, C21, but not C22
+
+            The "local" sum-product update rule
+        :param Q: matrix of log-probabilities
+        :param hij_old: Old left messages
+        :param hji_old: Old right messages
+        :return: The new messages (undamped)
+        """
+
+        N_local = sum(self._particle_count[self._local_indices, frame_index]).astype(int)
+        start = timeit.default_timer()
+        # Hij
+        A1 = exp(Q + hji_old)[0:N_local,:]
+        hij_new = hij_old
+        hij_new[0:N_local,:] = -log(dot(A1,self.boolean_matrix(Q.shape[1])))
+
+        # Hji
+        A1 = exp(Q + hij_old)[0:N_local,:]
+        hji_new = hji_old
+        hji_new[0:N_local,:] = -log(dot(A1,self.boolean_matrix(Q.shape[1])))
+
+        #hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
+        #hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
+        self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
+        # logdotexp update
+        #hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
+        return hij_new, hji_new
+
+
+class NonTrackingInferrerExplicit(NonTrackingInferrerRegion):
+    """
+        Computes the permanent almost explicitely (cutting off long distances and being implicit for short distances).
+        It works only in the case when the situation is clustered into groups of 3, 4 particles.
+    """
+    # TODO: write it
+
