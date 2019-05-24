@@ -1177,17 +1177,17 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
     def compute_damping_factor(self, F, F_minus_one, F_minus_two, score):
         """
             Computes the dynamic damping factor ass explained in report
-        :param F:
-        :param F_minus_one:
-        :param F_minus_two:
-        :param score:
-        :return:
+        :param F: current energy
+        :param F_minus_one: previous energy
+        :param F_minus_two: "grandparent"-energy
+        :param score: previous score
+        :return: current score and subsequent damping factor
         """
-        oscillation_indicator = (F - F_minus_one) * (F_minus_one - F_minus_two)
+        oscillation_indicator = ((F - F_minus_one) * (F_minus_one - F_minus_two) < 0)
         score = self._dynamic_damping_delta * (score + oscillation_indicator)
         gamma = self._dynamic_damping_gamma_min + \
                 score * (1 - self._dynamic_damping_delta) * (1 - self._dynamic_damping_gamma_min)
-        return gamma
+        return score, gamma
 
     def extend_matrix_by_one_row_and_one_column(self, H):
         """
@@ -1304,20 +1304,24 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         hij_old = hij
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
-        # Bethe = [F_BP_old]
+        #Bethe = [F_BP_old]
+        #Gamma = []
         #self.vprint(4,"")
-        #F_minus_one = 0
-        #F_minus_two = 0
-        #score = 0
+        F_minus_one = 0
+        F_minus_two = 0
+        score = 0
         for n in range(self._maxiter):
             hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
-            #gamma = self.compute_damping_factor(F_BP_old, F_minus_one, F_minus_two, score)
-            hij = (1. - self._gamma) * hij_new + self._gamma * hij_old
-            hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
+            if self._dynamic_damping is True:
+                score, gamma = self.compute_damping_factor(F_BP_old, F_minus_one, F_minus_two, score)
+            else:
+                gamma = self._gamma
+            hij = (1. - gamma) * hij_new + gamma * hij_old
+            hji = (1. - gamma) * hji_new + gamma * hji_old
             # Stopping condition:
             F_BP = self.bethe_free_energy(hij, hji, Q)
-            #F_minus_two = F_minus_one
-            #F_minus_one = F_BP_old
+            F_minus_two = F_minus_one
+            F_minus_one = F_BP_old
             self.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old-hij_new)}\r", end_="")
             if F_BP is np.nan or F_BP == np.inf:
                 raise FunctionEvaluation(f"Bethe energy got value F_BP={F_BP}")
@@ -1332,10 +1336,14 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             F_BP_old = F_BP
             hij_old = hij
             hji_old = hji
-            # Bethe.append(F_BP)
-        # fig = plt.figure()
-        # plt.plot(Bethe)
-        # plt.show()
+            #Bethe.append(F_BP)
+            #Gamma.append(gamma)
+        #fig = plt.figure()
+        #plt.plot(Bethe)
+        #plt.show()
+        #fig = plt.figure()
+        #plt.plot(Gamma, color='r')
+        #plt.show()
         return F_BP, hij, hji, n  # shall we store n somewhere and send it back to the user in some sort of diagnosis object ?
 
     def sum_product_energy(self, dr, frame_index, n_on, n_off, N, M):
