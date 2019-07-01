@@ -122,9 +122,21 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
         inferrer.infer()
     except (SystemExit, KeyboardInterrupt):
         pass
-    final_diffusivities = pd.DataFrame(inferrer._final_diffusivities, index=list(inferrer._cells.keys()),
-                                       columns=['D'])
-    return final_diffusivities
+    if method['inference_mode'] == "D":
+        final_parameters = pd.DataFrame(inferrer._final_diffusivities, index=list(inferrer._cells.keys()),
+                                           columns=['D'])
+    elif method['inference_mode'] == "DD":
+        final_diffusivities = pd.DataFrame(inferrer._final_diffusivities, index=list(inferrer._cells.keys()),
+                                           columns=['D'])
+        #final_drifts = pd.DataFrame(inferrer._final_drifts, index=list(inferrer._cells.keys()),
+        #                            columns=['drift x', 'drift y'])
+        final_parameters = final_diffusivities
+        final_parameters['drift x'] = inferrer._final_drifts['dx']
+        final_parameters['drift y'] = inferrer._final_drifts['dy']
+    else:
+        raise ValueError("Invalid value for inference_mode. Choose 'D' or 'DD'.")
+
+    return final_parameters
 
 
 ''' v0.3 does solve Rac1 bug (empty cells)
@@ -240,7 +252,7 @@ class NonTrackingInferrer:
         :param inference_mode: 'D' : Infer only diffusivity
                                'DD': Infer diffusivity and drift.
         :param final_diffusivities: NOT A PARAMETER The final diffusivities are the most up-to-date. Only to be changed at the end of an estimation
-        :param final_drifts: The final drifts are the most up-to-date. Only to be changed at the end of an estimation
+        :param final_drifts: NOT A PARAMETER The final drifts are the most up-to-date. Only to be changed at the end of an estimation
         :param cells_to_infer: An array of indices on which we want to infer
         :param neighbourhood_order: The order of the neighbourhoods for regional inference
         :param minlnL: The cut-off threshold for small probabilities
@@ -596,12 +608,9 @@ class NonTrackingInferrer:
         except FunctionEvaluation as error:
             self.vprint(1, f"Warning: Function Evaluation failed.")
             D_in = self._starting_diffusivities[i]
-            drift_in = np.array([np.nan,np.nan])
+            # drift_in = np.array([np.nan,np.nan])
+            drift_in = self._starting_drifts[i,:]
         #import pdb; pdb.set_trace()
-        ''' Remark: Nelder-Mead does not have positivity constraints for D_in, so we might find a negative value.
-            'smoothedPosterior' is implemented to be symmetric, so we should still find the optimum.
-        '''
-
         # D_i_ub=max([1.5*(D_i-s2/dt),0.])
         # print("D corrected for motion blur and localization error:", D_i_ub)
         self.vprint(1, f"\nCell no.: {i}")
