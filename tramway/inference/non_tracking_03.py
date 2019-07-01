@@ -1083,7 +1083,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         """
             The logarithm of `p_m`
         :param x: The value of which we want to evaluate the probability
-        :param Delta: The obseved particle number difference
+        :param Delta: The observed particle number difference
         :param N: The number of particles in the first frame
         :return:
         """
@@ -1656,10 +1656,9 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 # Child classes for different methods ? MPA, BP, BPchemPotChertkov, BPchemPotMezard, BP_JB, maybe others
 # -----------------------------------------------------------------------------
 class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
-    '''
-    def __init__(self, parentAttributes, index_to_infer, region_indices):
-        super(nonTrackingInferrerRegionBPchemPotMezard, self).__init__(parentAttributes, index_to_infer, region_indices)
-    '''
+    """
+        Implements the chemical potential solution with the Mezard formulation
+    """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
         hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
@@ -1701,6 +1700,9 @@ class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
 
 
 class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
+    """
+        Implements the chemical potential solution with the Chertkov formulation
+    """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
         hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
@@ -1737,6 +1739,9 @@ class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
 
 
 class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
+    """
+        Implements the class of phimu methods with all possible combinations of phantom and chemical potential in the inner hex and outer rings
+    """
 
     def p_m(self, x, Delta, N):
         '''Poissonian probability for x particles to appear between frames given Delta=M-N
@@ -1962,6 +1967,9 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
 
 
 class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegionBPchemPotChertkov):
+    """
+        At the moment this is written, I believe this corresponds to one of the phimu methods
+    """
 
     def p_m(self, x, Delta, N):
         '''Poissonian probability for x particles to appear between frames given Delta=M-N
@@ -2264,6 +2272,9 @@ class NonTrackingInferrerRegionBPalternativeUpdateJB(NonTrackingInferrerRegion):
 
 
 class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
+    """
+        Global method
+    """
 
     def __init__(self, parentAttributes, index_to_infer, region_indices):
         super(NonTrackingInferrerRegion, self).__init__(
@@ -2551,6 +2562,11 @@ class NonTrackingInferrerExplicit(NonTrackingInferrerRegion):
 
 
 class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
+    """
+        This class implements the Naïve method, where we only sum over the matching and not over non.
+        It is naïve in the sense that it avoids a priori unneccesarily complicated formulations.
+        It is theoretically justified in a weak sense detailed in the report.
+    """
     def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
         # self._stored_hij[frame_index] = [None] * (M - max([0, int(Delta)]))
         '''
