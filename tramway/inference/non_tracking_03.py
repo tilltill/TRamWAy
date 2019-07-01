@@ -1232,8 +1232,24 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         return self._smoothing_factor * penalization
 
     def smoothing_prior_heuristic(self):
-        # TODO
-        raise ("Not supported yet")
+        """
+            This heuristic smoothing make use the dual graph of the tessellation.
+            Every two adjacent cells are connected by an edge.
+            To each of those edges we assign a value equal to the absolute value of the difference between the diffusivities in the two cells.
+            This value is weighed by the inverse distance separating the two cell centers
+            In the end, all weights are summed. This gives a measure of the amplitude of variations in the tessellation.
+        :return: float. The penalization
+        """
+        penalization = 0
+        index = self._cells_to_infer
+        for i in index:
+            sum_distances = sum([np.linalg.norm(self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) for j in self.get_neighbours(i)])
+            for j in self.get_neighbours(i):
+                value = abs(self._working_diffusivities[i] - self._working_diffusivities[j])
+                weight = np.linalg.norm(self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) / sum_distances
+                penalization += value * weight
+
+        return penalization
 
     def smoothed_posterior(self, D):
         """
