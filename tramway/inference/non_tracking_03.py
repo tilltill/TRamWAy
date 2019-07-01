@@ -11,6 +11,7 @@ from scipy.special import logsumexp
 from scipy.optimize import linear_sum_assignment as kuhn_munkres
 from scipy.stats import skellam
 from scipy.optimize import minimize
+from scipy.integrate import quad, dblquad
 import inspect
 import multiprocessing as mp
 import sys
@@ -59,6 +60,10 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
     except KeyError:
         correct_p_off = False
     try:
+        correct_p_off_MC = method['correct_p_off_MC']
+    except KeyError:
+        correct_p_off_MC = True
+    try:
         tessellation = method['tessellation']
     except KeyError:
         tessellation = None
@@ -70,6 +75,10 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
         dynamic_damping = False
         dynamic_damping_delta = None
         dynamic_damping_gamma_min = None
+    try:
+        MPA_max_distance_cutoff = method['MPA_max_distance_cutoff']
+    except KeyError:
+        MPA_max_distance_cutoff = np.inf
     inferrer = NonTrackingInferrer(cells=cells,
                                    dt=dt,
                                    tessellation=tessellation,
@@ -103,9 +112,11 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
                                    dynamic_damping_delta=dynamic_damping_delta,
                                    dynamic_damping_gamma_min=dynamic_damping_gamma_min,
                                    global_inference=global_inference,
+                                   MPA_max_distance_cutoff=MPA_max_distance_cutoff,
                                    hex_phimu=hex_phimu,
                                    ring_phimu=ring_phimu,
                                    correct_p_off=correct_p_off,
+                                   correct_p_off_MC=correct_p_off_MC,
                                    verbose=method['verbose'])
     try:
         inferrer.infer()
@@ -184,18 +195,20 @@ class NonTrackingInferrer:
                  '_neighbourhood_order', '_starting_diffusivities', '_starting_drifts', '_several_runs_maxiter',
                  '_several_runs_tolerance', '_optimizer', '_scheme', '_method', '_parallel', '_phantom_particles',
                  '_chemPot', '_messages_type', '_inference_mode', '_distribution', '_useLq', '_correct_p_off',
-                 '_hex_phimu', '_ring_phimu', '_hij_init_takeLast', '_global', '_cutoff_low_p_non', '_cutoff_low_Pij',
-                 '_cutoff_log_threshold', '_sparse_energy_computation', '_sparse_energy_computation_sparsity',
-                 '_dynamic_damping', '_dynamic_damping_delta', '_dynamic_damping_gamma_min', '_final_diffusivities',
-                 '_final_drifts', '_verbose', '_plot')
+                 '_hex_phimu', '_ring_phimu', '_hij_init_takeLast', '_global', '_MPA_max_distance_cutoff',
+                 '_cutoff_low_p_non', '_cutoff_low_Pij', '_cutoff_log_threshold', '_sparse_energy_computation',
+                 '_sparse_energy_computation_sparsity', '_dynamic_damping', '_dynamic_damping_delta',
+                 '_dynamic_damping_gamma_min', '_final_diffusivities', '_final_drifts', '_verbose', '_plot',
+                 "_correct_p_off_MC")
 
     def __init__(self, cells, dt, tessellation=None, gamma=0.8, smoothing_factor=0, optimizer='NM', tol=1e-3, epsilon=1e-8,
                  maxiter=10000, phantom_particles=1, messages_type='CLV', chemPot='None', chemPot_gamma=1, chemPot_mu=1,
                  scheme='1D', method='BP', distribution='gaussian', temperature=1, parallel=1, hij_init_takeLast=False,
                  useLq=False, q=0.5, p_off=0, mu_on=0, starting_diffusivities=[1], starting_drifts=[0, 0],
                  inference_mode='D', cells_to_infer='all', neighbourhood_order=1, minlnL=-100, dynamic_damping=False,
-                 dynamic_damping_delta=None, dynamic_damping_gamma_min=None, global_inference=False, hex_phimu="",
-                 ring_phimu="", correct_p_off=False, verbose=1):
+                 dynamic_damping_delta=None, dynamic_damping_gamma_min=None, global_inference=False,
+                 MPA_max_distance_cutoff=np.inf, hex_phimu="", ring_phimu="", correct_p_off=False,
+                 correct_p_off_MC=True, verbose=1):
         """
         :param cells: An object of type 'Distributed' containing the data tessellated into cells
         :param tessellation:
@@ -243,7 +256,13 @@ class NonTrackingInferrer:
                             'phimu': Phantom particles and chemical potential
                             ''     : Neither phantom particles, nor chemical potential
                            Only if chemPot == 'phimu'
-        :param correct_p_off: (boolean) If true, use the p_off correction accounting for particles leaving the region
+        :param dynamic_damping: If `True` adapts the damping parameter dynamically
+        :param dynamic_damping_delta: The discount factor for dynamic damping. A float between 0 (no memory) and 1 (perfect memory)
+        :param dynamic_damping_gamma_min: The minimum threshold for the damping factor.
+        :param global_inference: If `True`, the neighbourhood of each cell is the whole population of cells
+        :param MPA_max_distance_cutoff: float, default value `inf`. Gives the maximum admissible distance for translocations.
+        :param correct_p_off: (boolean) If `True`, use the p_off correction accounting for particles leaving the region
+        :param correct_poff_MC: (boolean) If `True` and if `correct_p_off` is `True`, then poff correction is done via Monte-Carlo simulation and a mean-field approach. Otherwise, the correction is computed by numerical integration for each praticle using numerical integration.
         :param verbose: Level of verbosity.
                 0 : mute (not advised)
                 1 : introverted (advised)
@@ -275,6 +294,9 @@ class NonTrackingInferrer:
         self._q = q
         self._minlnL = minlnL
         self._neighbourhood_order = neighbourhood_order
+        self._MPA_max_distance_cutoff = MPA_max_distance_cutoff
+        if self._MPA_max_distance_cutoff == 0:
+            self.vprint(1, f"Warning: The cutoff distance is set to 0.")
         if len(starting_diffusivities) == 1:
             self._starting_diffusivities = starting_diffusivities[0] * np.ones(len(cells.keys()))
         else:
@@ -299,6 +321,7 @@ class NonTrackingInferrer:
         self._distribution = distribution
         self._useLq = useLq
         self._correct_p_off = correct_p_off
+        self._correct_p_off_MC = correct_p_off_MC
 
         # Phantom particles and chemical potential Hex/Ring combinations
         # possible values: "phi", "mu", "phimu", ""
@@ -308,7 +331,7 @@ class NonTrackingInferrer:
         # Speed-up hacks
         self._hij_init_takeLast = hij_init_takeLast
         self._global = global_inference
-        self._cutoff_low_p_non = False
+        self._cutoff_low_p_non = True
         self._cutoff_low_Pij = True
         self._cutoff_log_threshold = -10
         self._sparse_energy_computation = True
@@ -360,7 +383,12 @@ class NonTrackingInferrer:
             assert(self._distribution == 'gaussian')
             assert(self._tessellation is not None)
         if self._dynamic_damping is True:
-            assert(self._chemPot == 'None' and self._messages_type == 'CLV')
+            assert(self._chemPot == 'None' and (self._messages_type == 'CLV' or self._messages_type == 'Naive'))
+        if self._correct_p_off_MC is False:
+            assert(self._correct_p_off is True)
+        if self._MPA_max_distance_cutoff is not np.inf:
+            pass
+            # self.vprint(1, f"Warning: The cutoff is not implemented yet.")
 
     def confirm_parameters(self):
         """
@@ -368,13 +396,13 @@ class NonTrackingInferrer:
         """
         print(f"Verbosity is {self._verbose}")
         self.vprint(1,
-                    f"Inference is done with methods: \n*\t`method={self._method}` \n*\t`scheme={self._scheme}` \n*\t`optimizer={self._optimizer}` \n*\t`distribution={self._distribution}` \n*\t`parallel={self._parallel}` \n*\t`hij_init_takeLast={self._hij_init_takeLast}` \n*\t`chemPot={self._chemPot}` \n*\t`messages_type={self._messages_type}` \n*\t`inference_mode={self._inference_mode}` \n*\t`phantom_particles={self._phantom_particles}` \n*\t`useLq={self._useLq}` \n*\t`global_inference={self._global}`")
+                    f"Inference is done with methods: \n*\t`method={self._method}` \n*\t`scheme={self._scheme}` \n*\t`optimizer={self._optimizer}` \n*\t`distribution={self._distribution}` \n*\t`parallel={self._parallel}` \n*\t`chemPot={self._chemPot}` \n*\t`messages_type={self._messages_type}` \n*\t`inference_mode={self._inference_mode}` \n*\t`phantom_particles={self._phantom_particles}` \n*\t`useLq={self._useLq}` \n*\t`global_inference={self._global}`")
         self.vprint(1,
-                    f"The tuning is: \n*\t`gamma={self._gamma}` \n*\t`smoothing_factor={self._smoothing_factor}` \n*\t`tol={self._tol}` \n*\t`maxiter={self._maxiter}` \n*\t`temperature={self._temperature}` \n*\t`chemPot_gamma={self._chemPot_gamma}` \n*\t`chemPot_mu={self._chemPot_mu}` \n*\t`epsilon={self._epsilon}` \n*\t`minlnL={self._minlnL}` \n*\t`neighbourhood_order={self._neighbourhood_order}` \n*\t`q={self._q}`")
+                    f"The tuning is: \n*\t`gamma={self._gamma}` \n*\t`smoothing_factor={self._smoothing_factor}` \n*\t`tol={self._tol}` \n*\t`maxiter={self._maxiter}` \n*\t`temperature={self._temperature}` \n*\t`chemPot_gamma={self._chemPot_gamma}` \n*\t`chemPot_mu={self._chemPot_mu}` \n*\t`epsilon={self._epsilon}` \n*\t`minlnL={self._minlnL}` \n*\t`neighbourhood_order={self._neighbourhood_order}` \n*\t`q={self._q}` \n*\t`MPA_max_distance_cutoff={self._MPA_max_distance_cutoff}`")
+        self.vprint(1,
+                    f"Speed-ups are: \n*\t`dynamic_damping={self._dynamic_damping}` \n*\t`dynamic_damping_delta={self._dynamic_damping_delta}` \n*\t`dynamic_damping_gamma_min={self._dynamic_damping_gamma_min}` \n*\t`cutoff_low_p_non={self._cutoff_low_p_non}` \n*\t`cutoff_low_Pij={self._cutoff_low_Pij}` \n*\t`cutoff_log_threshold={self._cutoff_log_threshold}` \n*\t`sparse_energy_computation={self._sparse_energy_computation}` \n*\t`sparse_energy_computation_sparsity={self._sparse_energy_computation_sparsity}` \n*\t`hij_init_takeLast={self._hij_init_takeLast}`")
         self.vprint(1, f"Inference will be done on cells {self._cells_to_infer}")
         self.vprint(1, f"`p_off is {self._p_off},\tmu_on={self._mu_on}`")
-
-        self.vprint(1, f"Used speed-up hacks are: \n*\t`cutoff_low_p_non={self._cutoff_low_p_non}` \n*\t`cutoff_low_Pij={self._cutoff_low_Pij}` \n*\t`cutoff_log_threshold={self._cutoff_log_threshold}` \n*\t`sparse_energy_computation={self._sparse_energy_computation}` \n*\t`sparse_energy_computation_sparsity={self._sparse_energy_computation_sparsity}`")
 
     '''
     # TODO : check if this function is really necessary at this level. It gets overridden by the child
@@ -519,8 +547,8 @@ class NonTrackingInferrer:
             self._parallel, self._hij_init_takeLast, self._useLq, self._q, self._p_off, self._mu_on,
             self._starting_diffusivities, self._starting_drifts, self._inference_mode, self._cells_to_infer,
             self._neighbourhood_order, self._minlnL, self._dynamic_damping, self._dynamic_damping_delta,
-            self._dynamic_damping_gamma_min, self._global, self._hex_phimu, self._ring_phimu, self._correct_p_off,
-            self._verbose)
+            self._dynamic_damping_gamma_min, self._global, self._MPA_max_distance_cutoff, self._hex_phimu,
+            self._ring_phimu, self._correct_p_off, self._correct_p_off_MC, self._verbose)
         if self._chemPot == 'Chertkov':
             local_inferrer = NonTrackingInferrerRegionBPchemPotChertkov(parent_attributes, i, region_indices)
         elif self._chemPot == 'Mezard':
@@ -762,7 +790,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         """
         self._hji[frame][non] = hji
 
-    # p_off correction
+    # p_off correction MC
     def draw_p1(self, size=1):
         """
             Draws a point in the region from the uniform distribution
@@ -908,6 +936,104 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         p_out = self.compute_p_out()
         return 1 - (1 - self._parent_p_off) * (1 - p_out)
 
+    # p_off correction integration
+    def find_xmin_xmax(self, i):
+        """
+            Find the minimal and maximal x-coordinate of cell i
+        :param i: index of the cell
+        :return: The minimum and maximum coordinates
+        """
+        xmin = self._tessellation.cell_centers[i] - self._tessellation.hexagon_radius
+        xmax = self._tessellation.cell_centers[i] - self._tessellation.hexagon_radius
+        return xmin, xmax
+
+    def ymin(self, i, x):
+        """
+            Computes the minimum y-coordinate in cell i at slice x
+        :param i: index of the cell
+        :param x: x-coordinate of the slice
+        :return: The minimum y-coordinate
+        """
+        slope = 2 * self._tessellation.hexagon_radius / sqrt(3)
+        centre = self._tessellation.cell_centers[i]
+        if x <= centre:
+            intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept - slope*x
+        elif x >= centre:
+            intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept + slope*x
+
+    def ymax(self, i, x):
+        """
+            Computes the maximum y-coordinate in cell i at slice x
+        :param i: index of the cell
+        :param x: x-coordinate of the slice
+        :return: The maximum y-coordinate
+        """
+        slope = 2 * self._tessellation.hexagon_radius / sqrt(3)
+        centre = self._tessellation.cell_centers[i]
+        if x <= centre:
+            intercept = centre[1] + 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept + slope * x
+        elif x >= centre:
+            intercept = centre[1] + 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept - slope * x
+
+    def pout_given_p1(self, p1):
+        """
+            Computes the probability of going out of the region in `self._dt` seconds, given an initial position p1
+        :param p1: The initial position
+        :return: The probability of going out of the region
+        """
+        for i in self._region_indices:
+            if self.is_in_cell(i, p1):
+                cell_index = i
+        try:
+            D = self._final_diffusivities[cell_index]
+        except KeyError:
+            self.vprint(1, f"KeyError. p1 is contained in no cell of the region.")
+        I_array = []
+        for i in self._region_indices:
+            xmin, xmax = self.find_xmin_xmax(i)
+            Ii = dblquad(lambda x, y: exp(-((x-p1[0])**2 + (y-p1[1])**2)/(4 * D * self._dt)) / (4 * pi * D * self._dt),
+                         xmin, xmax, lambda x: self.ymin(i, x), lambda x: self.ymax(i, x))
+            I_array.append(Ii)
+        I = sum(I_array)
+        return 1 - I
+
+    def corrected_poff_array(self, frame_index):
+        """
+            Computes the corrected poff* array of the points in frame `frame_index` using numerical integration
+        :param frame_index: The index of the concerned frame
+        :return: array of exit probabilities
+        """
+        r_total = []
+        t_total = []
+        for j in self._region_indices:
+            cell = self._cells[j]
+            r = cell.r  # the recorded positions in cell
+            t = cell.t  # the recorded times in cell
+            r_total.extend(r)
+            t_total.extend(t)
+        r_total = np.array(r_total)  # r_total contains all the position in the region
+        t_total = np.array(t_total)  # t_total contains the corresponding times in the same order
+        # List of times corresponding to frames:
+        times = np.arange(min(t_total), max(t_total + self._dt / 100.), self._dt)
+        # Build lists of frames corresponding to times. A frame is an array of positions:
+        frames = self.rt_to_frames(r_total, t_total, times)
+        positions = frames[frame_index]
+
+        corrected_poff_array = []
+        for p1 in positions:
+            corrected_poff = 1 - (1 - self._parent_p_off) * (1 - self.pout_given_p1(p1))
+            corrected_poff_array.append(corrected_poff)
+
+        return corrected_poff_array
+
     # Other helper functions #
     def particle_count(self):
         """
@@ -994,6 +1120,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
                 #import pdb; pdb.set_trace()
         if self._cutoff_low_Pij is True:
             lnp[lnp < self._cutoff_log_threshold] = self._minlnL
+        if self._method == 'MPA':
+            lnp[sqrt(dr[0] ** 2 + dr[1] ** 2) > self._MPA_max_distance_cutoff] = self._minlnL
         return lnp
 
     def P_ij(self, n_off, n_on, dr, frame_index):
@@ -1051,9 +1179,15 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         out = zeros([n_on + N, n_off + M])
         LM = ones([n_on + N, n_off + M]) * self._region_area
         lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
-        out[:N, :M] = lnp - log(LM[:N, :M])
-        out[:N, M:] = -log(LM[:N, M:]/self._p_off)
-        out[N:, :M] = -log(LM[N:, :M]/self._p_off)
+        out[:N, :M] = lnp - log(LM[:N, :M])# / (1-self._p_off))
+        if self._correct_p_off_MC is True:
+            out[:N, M:] = -log(LM[:N, M:])# / self._p_off)
+            out[N:, :M] = -log(LM[N:, :M])# / self._p_off)
+        elif self._correct_p_off_MC is False:
+            out[:N, M:] = -log(LM[:N, M:])# / self.corrected_poff_array(frame_index))
+            out[N:, :M] = -log(LM[N:, :M])# / self.corrected_poff_array(frame_index + 1))
+        else:
+            raise ValueError(f"Invalid value for `correct_p_off_MC`. Please choose either `True` or `False`.")
         out[N:, M:] = 2. * self._minlnL  # Note: Why not 0 ??
         return out
 
