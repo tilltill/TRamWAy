@@ -471,7 +471,7 @@ class NonTrackingInferrer:
             pool.close()
             pool.join()
             results = [r.get() for r in result_objects]
-            self._final_diffusivities = pd.DataFrame(results, index=list(self._cells_to_infer.keys()), columns=['D'])
+            self._final_diffusivities = pd.DataFrame(results, index=list(self._cells_to_infer), columns=['D'])
             # Check : Is index correct ?
 
         # SEQUENTIAL VERSION #
@@ -719,7 +719,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 
     __slots__ = ('_index_to_infer', '_region_indices', '_drs', '_region_area', '_particle_count', '_hij', '_hji',
                  'optimizer_first_iteration', 'maxiter_attained_counter', '_region_mu_on', '_index_to_infer_mu_on',
-                 '_parent_p_off', '_working_diffusivities', '_working_drifts', 'Gamma_n')
+                 '_parent_p_off', '_working_diffusivities', '_working_drifts', 'Gamma_n', 'fit_time', 'iterations',
+                 'runtime_error_count')
 
     def __init__(self, parentAttributes, index_to_infer, region_indices):
         super(NonTrackingInferrerRegion, self).__init__(
@@ -755,7 +756,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 
         self._parent_p_off = self._p_off
 
-        self.Gamma_n = 0
+        self.Gamma_n = 0  # unused. I don't remember what it was for... Ah yes, it was the Gamma_n from the report
+
+        self.fit_time = np.nan  # saves the time it took after the optimization
+        self.iterations = np.nan  # saves the number of iterations after the optimization
+        self.runtime_error_count = np.nan  # saves the count of runtime errors encountered
 
     # hij, hji getters and setters #
     def get_hij(self, frame, non):
@@ -2656,6 +2661,5 @@ class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
             Q = self.Q_ij(M - Delta, M, dr, frame_index)
             mpa_row, mpa_col = kuhn_munkres(-Q)
             E_MPA = self.MPA_energy(Q, mpa_row, mpa_col)
-            score = E_MPA
-            max_score = score
+            max_score = -E_MPA
         return -max_score
