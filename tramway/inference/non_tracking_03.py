@@ -2623,12 +2623,12 @@ class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
         if self._phantom_particles:
             assert (M == N - n_off + n_on)  # just a consistency check
         out = zeros([n_on + N, n_off + M])
-        LM = ones([n_on + N, n_off + M]) * self._region_area
+        LM = ones([n_on + N, n_off + M])  # * self._region_area
         lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
         out[:N, :M] = lnp - log(LM[:N, :M] / (1-self._parent_p_off))
         if self._correct_p_off_MC is True:
             out[:N, M:] = -log(LM[:N, M:] / self._p_off)
-            out[N:, :M] = -log(LM[N:, :M] / self._p_off)
+            out[N:, :M] = -log(LM[N:, :M] * self._region_area / self._p_off)
         elif self._correct_p_off_MC is False:
             out[:N, M:] = -log(LM[:N, M:] / self.corrected_poff_array(frame_index))
             out[N:, :M] = -log(LM[N:, :M] / self.corrected_poff_array(frame_index + 1))
