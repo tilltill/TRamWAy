@@ -17,10 +17,11 @@ import multiprocessing as mp
 import sys
 import timeit
 import random
-#import non_tracking_extensions
-#from tqdm import tqdm
+# import non_tracking_extensions
+# from tqdm import tqdm
 from matplotlib import pylab as plt
 import warnings
+
 warnings.simplefilter("error")
 
 setup = {
@@ -124,11 +125,11 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
         pass
     if method['inference_mode'] == "D":
         final_parameters = pd.DataFrame(inferrer._final_diffusivities, index=list(inferrer._cells.keys()),
-                                           columns=['D'])
+                                        columns=['D'])
     elif method['inference_mode'] == "DD":
         final_diffusivities = pd.DataFrame(inferrer._final_diffusivities, index=list(inferrer._cells.keys()),
                                            columns=['D'])
-        #final_drifts = pd.DataFrame(inferrer._final_drifts, index=list(inferrer._cells.keys()),
+        # final_drifts = pd.DataFrame(inferrer._final_drifts, index=list(inferrer._cells.keys()),
         #                            columns=['drift x', 'drift y'])
         final_parameters = final_diffusivities
         final_parameters['drift x'] = inferrer._final_drifts['dx']
@@ -146,12 +147,13 @@ def non_tracking_03(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
     drift management is horrendously confusing in the argument passing of the optimizer
 '''
 
+
 class FunctionEvaluation(Exception):
     def __init__(self, message):
-        self.message = "Couldn't evaluate the function"
+        self.message = message
 
 
-def Lq(x,q=1):
+def Lq(x, q=1):
     """
         Implements the $L_q$ function.
     :param x: the argument of `Lq`
@@ -161,12 +163,22 @@ def Lq(x,q=1):
     if q == 1:
         return log(x)
     elif 0 < q < 1:
-        return (x**(1-q)-1) / (1-q)
+        return (x ** (1 - q) - 1) / (1 - q)
     else:
         raise ValueError(f"q={q} is out of bounds.")
 
 
-def expq(y,q=1):
+def giants_causeway_plot(tessellation, Z):
+    """
+        A function that plots the diffusivity map in 3D
+    :param tessellation:
+    :param Z:
+    :return:
+    """
+    # TODO
+
+
+def expq(y, q=1):
     """
         Implements the inverse $L_q$ function
     :param y: The argument
@@ -176,8 +188,8 @@ def expq(y,q=1):
     if q == 1:
         return exp(y)
     elif 0 < q < 1:
-        p = 1 / (1-q) # the conjugate of q, i.e the number such that (1/p + 1/q = 1)
-        return (y/p + 1) ** p
+        p = 1 / (1 - q)  # the conjugate of q, i.e the number such that (1/p + 1/q = 1)
+        return (y / p + 1) ** p
     else:
         raise ValueError(f"q={q} is out of bounds.")
 
@@ -201,7 +213,6 @@ def logdotexp(a, b):
 
 
 class NonTrackingInferrer:
-
     __slots__ = ('_cells', '_dt', '_tessellation', '_p_off', '_mu_on', '_cells_to_infer', '_gamma', '_smoothing_factor',
                  '_tol', '_maxiter', '_temperature', '_chemPot_gamma', '_epsilon', '_chemPot_mu', '_q', '_minlnL',
                  '_neighbourhood_order', '_starting_diffusivities', '_starting_drifts', '_several_runs_maxiter',
@@ -213,7 +224,8 @@ class NonTrackingInferrer:
                  '_dynamic_damping_gamma_min', '_final_diffusivities', '_final_drifts', '_verbose', '_plot',
                  "_correct_p_off_MC")
 
-    def __init__(self, cells, dt, tessellation=None, gamma=0.8, smoothing_factor=0, optimizer='NM', tol=1e-3, epsilon=1e-8,
+    def __init__(self, cells, dt, tessellation=None, gamma=0.8, smoothing_factor=0, optimizer='NM', tol=1e-3,
+                 epsilon=1e-8,
                  maxiter=10000, phantom_particles=1, messages_type='CLV', chemPot='None', chemPot_gamma=1, chemPot_mu=1,
                  scheme='1D', method='BP', distribution='gaussian', temperature=1, parallel=1, hij_init_takeLast=False,
                  useLq=False, q=0.5, p_off=0, mu_on=0, starting_diffusivities=[1], starting_drifts=[0, 0],
@@ -376,28 +388,28 @@ class NonTrackingInferrer:
         if self._distribution != 'gaussian' and self._distribution != 'rayleigh':
             raise ValueError("distribution not supported")
         if self._messages_type == 'JB':
-            assert(self._method == 'BP')
-            assert(self._chemPot == 'None')
-            assert(self._phantom_particles is True)
+            assert (self._method == 'BP')
+            assert (self._chemPot == 'None')
+            assert (self._phantom_particles is True)
             self.vprint(1, f"Warning: JB method is numerically unbstable")
         if self._inference_mode == 'DD':
-            assert(self._scheme == '1D')
-            assert(self._parallel is False)
+            assert (self._scheme == '1D')
+            assert (self._parallel is False)
         if self._useLq is True:
-            assert(0 < self._q < 1)
+            assert (0 < self._q < 1)
             self.vprint(1, f"Warning: Lq method is numerically unstable")
         if self._global is True:
             self.vprint(1, f"Warning: global mode is experimental")
-            assert(self._method=='BP')
+            assert (self._method == 'BP')
         if self._cutoff_low_Pij is True:
-            assert(self._minlnL < self._cutoff_log_threshold)
+            assert (self._minlnL < self._cutoff_log_threshold)
         if self._correct_p_off is True:
-            assert(self._distribution == 'gaussian')
-            assert(self._tessellation is not None)
+            assert (self._distribution == 'gaussian')
+            assert (self._tessellation is not None)
         if self._dynamic_damping is True:
-            assert(self._chemPot == 'None' and (self._messages_type == 'CLV' or self._messages_type == 'Naive'))
+            assert (self._chemPot == 'None' and (self._messages_type == 'CLV' or self._messages_type == 'Naive'))
         if self._correct_p_off_MC is False:
-            assert(self._correct_p_off is True)
+            assert (self._correct_p_off is True)
         if self._MPA_max_distance_cutoff is not np.inf:
             pass
             # self.vprint(1, f"Warning: The cutoff is not implemented yet.")
@@ -476,14 +488,14 @@ class NonTrackingInferrer:
 
         # SEQUENTIAL VERSION #
         elif self._parallel is False:
-            """ In the sequential method for the 1D scheme, the inferred value in cell i is assumed as the estimated 
-                diffusivity of cell i when inferring cells j>i. In the parallel method, these optimizations are 
+            """ In the sequential method for the 1D scheme, the inferred value in cell i is assumed as the estimated
+                diffusivity of cell i when inferring cells j>i. In the parallel method, these optimizations are
                 independent.
             """
             for i in self._cells_to_infer:
-                if self._inference_mode=='DD':
-                    self._final_diffusivities[i], self._final_drifts[i,:] = self.estimate(i)
-                elif self._inference_mode=='D':
+                if self._inference_mode == 'DD':
+                    self._final_diffusivities[i], self._final_drifts[i, :] = self.estimate(i)
+                elif self._inference_mode == 'D':
                     self._final_diffusivities[i] = self.estimate(i)
                 self.vprint(2, f"Current parameters with tol = {self._tol}")
                 self.vprint(2, f"diffusivities={self._final_diffusivities}")
@@ -492,11 +504,11 @@ class NonTrackingInferrer:
             self._final_diffusivities = pd.DataFrame(self._final_diffusivities, index=list(self._cells.keys()),
                                                      columns=['D'])
             self._final_drifts = pd.DataFrame(self._final_drifts, index=list(self._cells.keys()),
-                                                     columns=['dx','dy'])
+                                              columns=['dx', 'dy'])
             # Check : Is index correct ?
             if self._inference_mode == 'D' and self._several_runs_maxiter > 1:
                 for run in range(self._several_runs_maxiter):
-                    self.vprint(1,f"\n--------------- 1D run number {run} ---------------\n")
+                    self.vprint(1, f"\n--------------- 1D run number {run} ---------------\n")
                     self._final_diffusivities_old = self._final_diffusivities
                     for i in self._cells_to_infer:
                         if self._inference_mode == 'DD':
@@ -507,12 +519,12 @@ class NonTrackingInferrer:
                         self.vprint(2, f"diffusivities={self._final_diffusivities}")
                         if self._inference_mode == 'DD':
                             self.vprint(2, f"drifts={self._final_drifts}")
-                    #self._final_diffusivities = pd.DataFrame(self._final_diffusivities, index=list(self._cells.keys()),
+                    # self._final_diffusivities = pd.DataFrame(self._final_diffusivities, index=list(self._cells.keys()),
                     #                                         columns=['D'])
                     self._final_drifts = pd.DataFrame(self._final_drifts, index=list(self._cells.keys()),
                                                       columns=['dx', 'dy'])
                     difference = sum(abs(self._final_diffusivities['D'] - self._final_diffusivities_old['D']))
-                    self.vprint(1,f"difference = {difference}")
+                    self.vprint(1, f"difference = {difference}")
                     if difference < self._several_runs_tolerance:
                         break
             else:
@@ -521,7 +533,7 @@ class NonTrackingInferrer:
             raise ValueError("Invalid argument: parallel")
         self.vprint(1, f"Final diffusivities are:\n {self._final_diffusivities}")
         if self._inference_mode == 'DD':
-            self.vprint(1,f"Final drifts are:\n {self._final_drifts}")
+            self.vprint(1, f"Final drifts are:\n {self._final_drifts}")
 
     def estimate(self, i):
         """
@@ -538,14 +550,14 @@ class NonTrackingInferrer:
         fittime = time()
         if self._scheme == '1D':
             D = self._starting_diffusivities[i]
-            d = self._starting_drifts[i,:]
+            d = self._starting_drifts[i, :]
         elif self._scheme == '2D':
             D = array([self._starting_diffusivities[i], self._starting_diffusivities[i]])
-            d = np.hstack((self._starting_drifts[i,:], self._starting_drifts[i,:]))
+            d = np.hstack((self._starting_drifts[i, :], self._starting_drifts[i, :]))
         else:
             raise ValueError("This scheme is not supported. Choose '1D' or '2D'.")
         D_in = self._starting_diffusivities[i]
-        drift_in = self._starting_drifts[i,:]
+        drift_in = self._starting_drifts[i, :]
 
         # Select the BP version
         """ On this point we create a specialized copy of self.
@@ -564,7 +576,7 @@ class NonTrackingInferrer:
         if self._chemPot == 'Chertkov':
             local_inferrer = NonTrackingInferrerRegionBPchemPotChertkov(parent_attributes, i, region_indices)
         elif self._chemPot == 'Mezard':
-            self.vprint(2,"NonTrackingInferrerRegionBPchemPotMezard created")
+            self.vprint(2, "NonTrackingInferrerRegionBPchemPotMezard created")
             local_inferrer = NonTrackingInferrerRegionBPchemPotMezard(parent_attributes, i, region_indices)
         elif self._chemPot == 'PhanPot':
             local_inferrer = NonTrackingInferrerRegionBPchemPotPartialChertkov(parent_attributes, i, region_indices)
@@ -582,14 +594,14 @@ class NonTrackingInferrer:
             raise ValueError(
                 "chemPot or messages_type not valid. Suggestion: Select chemPot='None' and messages_type='CLV'.")
 
-        #import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         try:
             if self._optimizer == 'NM':
                 if self._inference_mode == 'D':
                     fit = minimize(local_inferrer.smoothed_posterior, x0=D, method='Nelder-Mead', tol=self._tol,
-                                       options={'disp': False, 'maxiter': 50, 'xatol': 1e-2, 'fatol': 1e-2})
+                                   options={'disp': False, 'maxiter': 50, 'xatol': 1e-2, 'fatol': 1e-2})
                 elif self._inference_mode == 'DD':
-                    start = np.hstack((D,d))
+                    start = np.hstack((D, d))
                     fit = minimize(local_inferrer.smoothed_posterior, x0=start, method='Nelder-Mead', tol=self._tol,
                                    options={'disp': True})
                     if self._scheme == '1D':
@@ -598,8 +610,12 @@ class NonTrackingInferrer:
                         drift_in = (fit.x)[2:4]
                     else:
                         raise ValueError("Wrong scheme. Choose 1D or 2D")
+                fit_time = local_inferrer.fit_time
+                iterations = local_inferrer.iterations
+                runtime_error_count = local_inferrer.runtime_error_count
                 if local_inferrer.maxiter_attained_counter > 0:
-                    self.vprint(3, f"Warning: maxiter={self._maxiter} attained {local_inferrer.maxiter_attained_counter} times during the optimization.")
+                    self.vprint(3,
+                                f"Warning: maxiter={self._maxiter} attained {local_inferrer.maxiter_attained_counter} times during the optimization.")
                     self.vprint(3, f"Suggestions: Increase gamma. Choose a more robust method.")
             else:
                 raise ValueError("This optimizer is not supported. Suggestion: Choose 'NM'. ")
@@ -607,10 +623,11 @@ class NonTrackingInferrer:
             self.vprint(2, f"fit = {fit}")
         except FunctionEvaluation as error:
             self.vprint(1, f"Warning: Function Evaluation failed.")
+            self.vprint(1, error.message)
             D_in = self._starting_diffusivities[i]
             # drift_in = np.array([np.nan,np.nan])
-            drift_in = self._starting_drifts[i,:]
-        #import pdb; pdb.set_trace()
+            drift_in = self._starting_drifts[i, :]
+        # import pdb; pdb.set_trace()
         # D_i_ub=max([1.5*(D_i-s2/dt),0.])
         # print("D corrected for motion blur and localization error:", D_i_ub)
         self.vprint(1, f"\nCell no.: {i}")
@@ -629,7 +646,7 @@ class NonTrackingInferrer:
         :param order: The order of the neighbourhood
         :return: An array or list (not sure) of the indices of the neighbour cells
         """
-        if order=='all':
+        if order == 'all':
             neighbours = list(self._cells.keys())
             neighbours.remove(cell_index)
             return neighbours
@@ -716,7 +733,6 @@ Within here, we consider a fixed diffusivity
 
 
 class NonTrackingInferrerRegion(NonTrackingInferrer):
-
     __slots__ = ('_index_to_infer', '_region_indices', '_drs', '_region_area', '_particle_count', '_hij', '_hji',
                  'optimizer_first_iteration', 'maxiter_attained_counter', '_region_mu_on', '_index_to_infer_mu_on',
                  '_parent_p_off', '_working_diffusivities', '_working_drifts', 'Gamma_n', 'fit_time', 'iterations',
@@ -741,18 +757,20 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 
         self._hij = [None] * self._particle_count.shape[1]
         self._hji = [None] * self._particle_count.shape[1]
-        for f in arange(len(self._hij)-1):
+        for f in arange(len(self._hij) - 1):
             # import pdb; pdb.set_trace()
             M = np.sum(self._particle_count[self._region_indices, f + 1]).astype(int)
-            self._hij[f] = [None] * (M+1)
-            self._hji[f] = [None] * (M+1)
+            self._hij[f] = [None] * (M + 1)
+            self._hji[f] = [None] * (M + 1)
 
         self.optimizer_first_iteration = True
         self.maxiter_attained_counter = 0
 
-        self._region_mu_on = self._mu_on * np.sum(self._particle_count[self._region_indices, :]) / sum(self._particle_count)
+        self._region_mu_on = self._mu_on * np.sum(self._particle_count[self._region_indices, :]) / sum(
+            self._particle_count)
         self.vprint(2, f"region_mu_on={self._region_mu_on}")
-        self._index_to_infer_mu_on = self._mu_on * np.sum(self._particle_count[self._index_to_infer, :]) / sum(self._particle_count)
+        self._index_to_infer_mu_on = self._mu_on * np.sum(self._particle_count[self._index_to_infer, :]) / sum(
+            self._particle_count)
 
         self._parent_p_off = self._p_off
 
@@ -773,7 +791,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             return self._hij[frame][non]
         except IndexError:
             print(self._hij[frame])
-            #import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             raise IndexError("hij index error")
 
     def set_hij(self, hij, frame, non):
@@ -786,7 +804,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             self._hij[frame][non] = hij
         except IndexError:
             pass
-            #import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
 
     def get_hji(self, frame, non):
         """
@@ -829,8 +847,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         y_square = np.random.uniform(low=0, high=1, size=size)
 
         # Fold the points into the triangle (half the square)
-        x_half_square = np.minimum(x_square, 1-y_square)
-        y_half_square = np.minimum(1-x_square, y_square)
+        x_half_square = np.minimum(x_square, 1 - y_square)
+        y_half_square = np.minimum(1 - x_square, y_square)
         x_half_square = x_half_square.reshape((-1, 1))
         y_half_square = y_half_square.reshape((-1, 1))
         # Generates hexes
@@ -881,15 +899,15 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         # multiply by standard deviation
         diffusivities = self._working_diffusivities[hexes]
         diffusivities = diffusivities.reshape((-1, 1))
-        x = x_scaled * sqrt(2*diffusivities*self._dt)
-        y = y_scaled * sqrt(2*diffusivities*self._dt)
+        x = x_scaled * sqrt(2 * diffusivities * self._dt)
+        y = y_scaled * sqrt(2 * diffusivities * self._dt)
         p_transloc = np.hstack((x, y))
 
-        #add
+        # add
         p2 = p1 + p_transloc
 
-        #if self._plot is True:
-            #plt.plot(p2[:, 0], p2[:, 1], 'b.', alpha=0.5)
+        # if self._plot is True:
+        # plt.plot(p2[:, 0], p2[:, 1], 'b.', alpha=0.5)
 
         return p2
 
@@ -908,9 +926,10 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         diff_scaled = (points - center) / radius
         x, y = diff_scaled[:, 0], diff_scaled[:, 1]
         # Test membership of the point in a partition of the hexagon
-        truth1 = (abs(y) <= 1/sqrt(3)) * (abs(x) <= 1)  # middle rectangle
-        truth2 = (1/sqrt(3) <= abs(y)) * (abs(y) <= 2/sqrt(3)) * (abs(x) <= 2 - abs(y)*sqrt(3))  # left and right triangles
-        truth = truth1*1 + truth2*1 - truth1*truth2*1  # logical or
+        truth1 = (abs(y) <= 1 / sqrt(3)) * (abs(x) <= 1)  # middle rectangle
+        truth2 = (1 / sqrt(3) <= abs(y)) * (abs(y) <= 2 / sqrt(3)) * (
+                abs(x) <= 2 - abs(y) * sqrt(3))  # left and right triangles
+        truth = truth1 * 1 + truth2 * 1 - truth1 * truth2 * 1  # logical or
         return truth == 1
 
     def is_in_region(self, p2):
@@ -922,7 +941,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         truth = np.ones(p2.shape[0]) * False
         for i in self._region_indices:
             truth_i = self.is_in_cell(i, p2) * 1
-            truth = truth + truth_i - truth*truth_i
+            truth = truth + truth_i - truth * truth_i
         truth = (truth == 1)
         if self._plot is True:
             plt.plot(p2[~truth, 0], p2[~truth, 1], 'b.')
@@ -939,7 +958,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         p1, hexes = self.draw_p1(N_draws)
         p2 = self.draw_p2(p1, hexes, N_draws)
         pin = sum(self.is_in_region(p2)) / len(p2)
-        assert(0 <= pin <= 1)
+        assert (0 <= pin <= 1)
         return 1 - pin
 
     def compute_corrected_p_off(self):
@@ -973,11 +992,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         if x <= centre:
             intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
                         - slope * centre[0]
-            return intercept - slope*x
+            return intercept - slope * x
         elif x >= centre:
             intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
                         - slope * centre[0]
-            return intercept + slope*x
+            return intercept + slope * x
 
     def ymax(self, i, x):
         """
@@ -1013,8 +1032,9 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         I_array = []
         for i in self._region_indices:
             xmin, xmax = self.find_xmin_xmax(i)
-            Ii = dblquad(lambda x, y: exp(-((x-p1[0])**2 + (y-p1[1])**2)/(4 * D * self._dt)) / (4 * pi * D * self._dt),
-                         xmin, xmax, lambda x: self.ymin(i, x), lambda x: self.ymax(i, x))
+            Ii = dblquad(
+                lambda x, y: exp(-((x - p1[0]) ** 2 + (y - p1[1]) ** 2) / (4 * D * self._dt)) / (4 * pi * D * self._dt),
+                xmin, xmax, lambda x: self.ymin(i, x), lambda x: self.ymax(i, x))
             I_array.append(Ii)
         I = sum(I_array)
         return 1 - I
@@ -1086,12 +1106,29 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 
         return particle_number
 
+    def estimate_mu(self):
+        """
+            Estimates the common mu parameter for the Poisson distributions of appearance and disappearances
+        :return: (float) an estimate for a global mu using the method of moments
+        """
+        N_particles_array = np.sum(self._particle_count, axis=0).astype(int)
+        Delta_array = N_particles_array[1:len(N_particles_array)] - N_particles_array[0:(len(N_particles_array) - 1)]
+        ME = np.mean(Delta_array ** 2 / 2)
+        return ME
+
+    def estimate_muon_muoff(self):
+        """
+            Estimates muon and muoff jointly using maximum likelihood
+        :return: 2 x (float) the estimates
+        """
+        # TODO
+
     def p_m(self, x, Delta, N):
         '''Poissonian probability for x particles to appear between frames given Delta=M-N
         and blinking parameters mu_on and mu_off. Consult the article for reference'''
         mu_off = N * self._p_off
         return (self._region_mu_on * mu_off) ** (x - Delta / 2.) / (
-                g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
+            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
 
     def lnp_m(self, x, Delta, N):
         """
@@ -1102,8 +1139,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :return:
         """
         mu_off = N * self._p_off
-        return log(self._region_mu_on * mu_off)*(x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
-                - log(iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
+        return log(self._region_mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+               - log(iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
 
     def lnp_ij(self, dr, frame_index):
         """
@@ -1116,9 +1153,9 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         try:
             if self._distribution == 'gaussian':
                 lnp = - log(4 * pi * D * self._dt) \
-                      - ((dr[0]-drift_x*self._dt)**2 + (dr[1]-drift_y*self._dt)**2) / (4. * D * self._dt)
+                      - ((dr[0] - drift_x * self._dt) ** 2 + (dr[1] - drift_y * self._dt) ** 2) / (4. * D * self._dt)
             elif self._distribution == 'rayleigh':
-                r2 = (dr[0]-drift_x*self._dt)**2 + (dr[1]-drift_y*self._dt)**2
+                r2 = (dr[0] - drift_x * self._dt) ** 2 + (dr[1] - drift_y * self._dt) ** 2
                 lnp = log(sqrt(r2)) - log(2. * D * self._dt) - r2 / (4. * D * self._dt)
             else:
                 raise ValueError("distribution not supported. Suggestion: Use 'gaussian'. ")
@@ -1127,11 +1164,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             raise ZeroDivisionError("Cannot have 0 diffusivity --> ZeroDivisionError")
         except RuntimeWarning:
             pass
-            #import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
             if np.any(np.isnan(lnp)):
                 raise FunctionEvaluation(f"nan appeared in lnp_ij")
                 pass
-                #import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
         if self._cutoff_low_Pij is True:
             lnp[lnp < self._cutoff_log_threshold] = self._minlnL
         if self._method == 'MPA':
@@ -1159,8 +1196,8 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :return: Matrix of log-probabilities for each distance or its -Lq(-.) transform
         """
         if self._useLq is True:
-            #import pdb; pdb.set_trace()
-            return -Lq( -self.lnp_ij(dr, frame_index), self._q )
+            # import pdb; pdb.set_trace()
+            return -Lq(-self.lnp_ij(dr, frame_index), self._q)
         else:
             return self.lnp_ij(dr, frame_index)
 
@@ -1193,13 +1230,13 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         out = zeros([n_on + N, n_off + M])
         LM = ones([n_on + N, n_off + M]) * self._region_area
         lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
-        out[:N, :M] = lnp - log(LM[:N, :M])# / (1-self._p_off))
+        out[:N, :M] = lnp - log(LM[:N, :M])  # / (1-self._p_off))
         if self._correct_p_off_MC is True:
-            out[:N, M:] = -log(LM[:N, M:])# / self._p_off)
-            out[N:, :M] = -log(LM[N:, :M])# / self._p_off)
+            out[:N, M:] = -log(LM[:N, M:])  # / self._p_off)
+            out[N:, :M] = -log(LM[N:, :M])  # / self._p_off)
         elif self._correct_p_off_MC is False:
-            out[:N, M:] = -log(LM[:N, M:])# / self.corrected_poff_array(frame_index))
-            out[N:, :M] = -log(LM[N:, :M])# / self.corrected_poff_array(frame_index + 1))
+            out[:N, M:] = -log(LM[:N, M:])  # / self.corrected_poff_array(frame_index))
+            out[N:, :M] = -log(LM[N:, :M])  # / self.corrected_poff_array(frame_index + 1))
         else:
             raise ValueError(f"Invalid value for `correct_p_off_MC`. Please choose either `True` or `False`.")
         out[N:, M:] = 2. * self._minlnL  # Note: Why not 0 ??
@@ -1225,8 +1262,10 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         for j in range(0, len(self._region_indices)):
             Ds[N_ix[j]:N_ix[j + 1]] = ones(Ds[N_ix[j]:N_ix[j + 1]].shape) * self._working_diffusivities[
                 self._region_indices[j]]
-            drift_x[N_ix[j]:N_ix[j + 1]] = ones(drift_x[N_ix[j]:N_ix[j + 1]].shape) * self._working_drifts[self._region_indices[j], 0]
-            drift_y[N_ix[j]:N_ix[j + 1]] = ones(drift_y[N_ix[j]:N_ix[j + 1]].shape) * self._working_drifts[self._region_indices[j], 1]
+            drift_x[N_ix[j]:N_ix[j + 1]] = ones(drift_x[N_ix[j]:N_ix[j + 1]].shape) * self._working_drifts[
+                self._region_indices[j], 0]
+            drift_y[N_ix[j]:N_ix[j + 1]] = ones(drift_y[N_ix[j]:N_ix[j + 1]].shape) * self._working_drifts[
+                self._region_indices[j], 1]
         return Ds, drift_x, drift_y
 
     # smoothing functions #
@@ -1257,10 +1296,13 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         penalization = 0
         index = self._cells_to_infer
         for i in index:
-            sum_distances = sum([np.linalg.norm(self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) for j in self.get_neighbours(i)])
+            sum_distances = sum(
+                [np.linalg.norm(self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) for j in
+                 self.get_neighbours(i)])
             for j in self.get_neighbours(i):
                 value = abs(self._working_diffusivities[i] - self._working_diffusivities[j])
-                weight = np.linalg.norm(self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) / sum_distances
+                weight = np.linalg.norm(
+                    self._tessellation.cell_centers[i] - self._tessellation.cell_centers[j]) / sum_distances
                 penalization += value * weight
 
         return penalization
@@ -1294,7 +1336,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         elif self._inference_mode == 'DD':
             if self._scheme == '1D':
                 self._working_diffusivities[self._index_to_infer] = D[0]
-                self._working_drifts[self._index_to_infer,:] = D[1]
+                self._working_drifts[self._index_to_infer, :] = D[1]
             elif self._scheme == '2D':
                 self._working_diffusivities[self._region_indices] = D[1]
                 self._working_diffusivities[self._index_to_infer] = D[0]
@@ -1302,7 +1344,6 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
                 self._working_drifts[self._index_to_infer] = D[2:4]
             else:
                 raise ValueError(f"scheme {self._scheme} not supported in 'DD' mode")
-
 
         # method selector
         if self._method == 'MPA':
@@ -1322,7 +1363,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             raise FunctionEvaluation()
 
         self.optimizer_first_iteration = False
-        #import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         return posterior
 
     # Sum-product BP #
@@ -1365,14 +1406,14 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :param H: The matrix to be extended
         :return: The extended matrix
         """
-        assert(H.shape[0] == H.shape[1])  # H needs to be square
+        assert (H.shape[0] == H.shape[1])  # H needs to be square
         n = H.shape[0]
-        K = zeros((n+1,n+1))
+        K = zeros((n + 1, n + 1))
         # Create the 4 blocks of K
         K[0:n, 0:n] = H
-        K[0:n, n] = H[:, n-1]
-        K[n, 0:n] = H[n-1, :]
-        K[n,n] = H[n-1, n-1]
+        K[0:n, n] = H[:, n - 1]
+        K[n, 0:n] = H[n - 1, :]
+        K[n, n] = H[n - 1, n - 1]
         return K
 
     def initialize_messages_in_a_smart_way(self, N, M, n_on, n_off, frame_index):
@@ -1393,11 +1434,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             hij, hji = self.initialize_messages(n_on + N, n_off + M)
             if self.get_hij(frame_index, n_on - 1) is not None:
                 try:
-                    hij = self.extend_matrix_by_one_row_and_one_column(self.get_hij(frame_index, n_on-1))
-                    hji = self.extend_matrix_by_one_row_and_one_column(self.get_hji(frame_index, n_on-1))
+                    hij = self.extend_matrix_by_one_row_and_one_column(self.get_hij(frame_index, n_on - 1))
+                    hji = self.extend_matrix_by_one_row_and_one_column(self.get_hji(frame_index, n_on - 1))
                 except:
                     self.vprint(1, f"Warning: hij(n_on-1) re-use did not work. Setting a breakpoint.")
-                    #import pdb; pdb.set_trace()
+                    # import pdb; pdb.set_trace()
         else:
             hij, hji = self.initialize_messages(n_on + N, n_off + M)
         assert (hij.shape == hji.shape)
@@ -1432,11 +1473,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         '''
 
         # logsumexp version
-        logsumexp_energy = + sum(np.logaddexp(0,Q + self._temperature*hij + self._temperature*hji)) \
-                           - sum(logsumexp(Q + self._temperature*hji, axis=1)) \
-                           - sum(logsumexp(Q + self._temperature*hij, axis=0))
-        #self.vprint(4,f"Bethe time \t\t= {(timeit.default_timer()-start)*1000} ms")
-        return logsumexp_energy/self._temperature
+        logsumexp_energy = + sum(np.logaddexp(0, Q + self._temperature * hij + self._temperature * hji)) \
+                           - sum(logsumexp(Q + self._temperature * hji, axis=1)) \
+                           - sum(logsumexp(Q + self._temperature * hij, axis=0))
+        # self.vprint(4,f"Bethe time \t\t= {(timeit.default_timer()-start)*1000} ms")
+        return logsumexp_energy / self._temperature
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
         """
@@ -1447,11 +1488,11 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :return: The new messages (undamped)
         """
         start = timeit.default_timer()
-        hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
-        #self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1]))) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old))) / self._temperature
+        # self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
         # logdotexp update
-        #hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
+        # hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
         return hij_new, hji_new
 
     def sum_product_BP(self, Q, hij, hji):
@@ -1468,9 +1509,9 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         hij_old = hij
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
-        #Bethe = [F_BP_old]
-        #Gamma = []
-        #self.vprint(4,"")
+        # Bethe = [F_BP_old]
+        # Gamma = []
+        # self.vprint(4,"")
         F_minus_one = 0
         F_minus_two = 0
         score = 0
@@ -1486,28 +1527,29 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
             F_BP = self.bethe_free_energy(hij, hji, Q)
             F_minus_two = F_minus_one
             F_minus_one = F_BP_old
-            self.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old-hij_new)}\r", end_="")
+            self.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old - hij_new)}\r",
+                        end_="")
             if F_BP is np.nan or F_BP == np.inf:
                 raise FunctionEvaluation(f"Bethe energy got value F_BP={F_BP}")
             try:
                 if abs(F_BP - F_BP_old) < self._epsilon:
-                    self.vprint(4,"")
+                    self.vprint(4, "")
                     break
             except RuntimeWarning:
                 pass
-                #import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
             # Update old values of energy and messages:
             F_BP_old = F_BP
             hij_old = hij
             hji_old = hji
-            #Bethe.append(F_BP)
-            #Gamma.append(gamma)
-        #fig = plt.figure()
-        #plt.plot(Bethe)
-        #plt.show()
-        #fig = plt.figure()
-        #plt.plot(Gamma, color='r')
-        #plt.show()
+            # Bethe.append(F_BP)
+            # Gamma.append(gamma)
+        # fig = plt.figure()
+        # plt.plot(Bethe)
+        # plt.show()
+        # fig = plt.figure()
+        # plt.plot(Gamma, color='r')
+        # plt.show()
         return F_BP, hij, hji, n  # shall we store n somewhere and send it back to the user in some sort of diagnosis object ?
 
     def sum_product_energy(self, dr, frame_index, n_on, n_off, N, M):
@@ -1542,7 +1584,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
                 n = 0
                 F_BP = np.nan
                 raise FunctionEvaluation(f"Runtime Warning happened in BP. Stopping the BP")
-            self.set_hij(hij,frame_index,n_on)
+            self.set_hij(hij, frame_index, n_on)
             self.set_hji(hji, frame_index, n_on)
             if n == self._maxiter - 1:
                 self.vprint(1, f"Warning: BP attained maxiter before converging.")
@@ -1589,7 +1631,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         :param frame_index: the index of the current frame
         :return: the minus log-likelihood between frame frame_index and frame frame_index+1
         """
-        #self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
+        # self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
         self.vprint(3, ".", end_='')
         M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
         N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
@@ -1601,7 +1643,7 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
         elif ((self._p_off == 0.) & (self._mu_on == 0.) & (delta == 0)) or (self._phantom_particles is False):
             # Q = self.Q_ij(0, 0, dr, frame_index)
             mlnL = self.sum_product_energy(dr, frame_index, 0, 0, N, M)
-            #self.vprint(3,f"mlnL={mlnL}")
+            # self.vprint(3,f"mlnL={mlnL}")
         elif self._phantom_particles is True:
             mlnL = self.marginal_minusLogLikelihood_phantom(dr, frame_index)
         else:
@@ -1610,13 +1652,13 @@ class NonTrackingInferrerRegion(NonTrackingInferrer):
 
     def marginal_minusLogLikelihood_multiFrame(self):
         '''Minus-log-likelihood marginalized over possible graphs and assignments using BP.'''
-        #self.vprint(3, f"call: marginal_minusLogLikelihood_multiFrame")
+        # self.vprint(3, f"call: marginal_minusLogLikelihood_multiFrame")
         self.vprint(2, "*", end_='')
         mlnL = 0
         for frame_index, dr in enumerate(self._drs):
             # print(f"frame_index={frame_index} \t dr={dr}")
             mlnL += self.marginal_minusLogLikelihood(dr, frame_index)
-            #import pdb; pdb.set_trace()
+            # import pdb; pdb.set_trace()
         return mlnL
 
     # -----------------------------------------------------------------------------
@@ -1675,10 +1717,10 @@ class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
     """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + exp(-self._chemPot_gamma))/self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)) \
-                       + exp(-self._chemPot_gamma))/self._temperature
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + exp(-self._chemPot_gamma)) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
+                       + exp(-self._chemPot_gamma)) / self._temperature
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -1689,8 +1731,8 @@ class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
         :param Q: log-likelihood matrix
         :return: The Bethe free energy
         """
-        #print("call bethe_free_energy, Mezard")
-        #import pdb; pdb.set_trace()
+        # print("call bethe_free_energy, Mezard")
+        # import pdb; pdb.set_trace()
         # We use logsumexp to avoid numerical underflow or overflow problems. The two versions do return different results and the logsumexp version gives realistic results on instances where the naive versions gives abusive results
 
         # Naive version
@@ -1703,14 +1745,16 @@ class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
         '''
 
         # logsumexp version, no constant term
-        #gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
-        term1_bis = + sum(np.logaddexp(0, Q + self._temperature*hij + self._temperature*hji))
-        term2_bis = - sum(logsumexp(np.hstack((Q + self._temperature*hji, -ones((Q.shape[0], 1))*self._chemPot_gamma)), axis=1))
-        term3_bis = - sum(logsumexp(np.vstack((Q + self._temperature*hij, -ones((1, Q.shape[1]))*self._chemPot_gamma)), axis=0))
+        # gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
+        term1_bis = + sum(np.logaddexp(0, Q + self._temperature * hij + self._temperature * hji))
+        term2_bis = - sum(
+            logsumexp(np.hstack((Q + self._temperature * hji, -ones((Q.shape[0], 1)) * self._chemPot_gamma)), axis=1))
+        term3_bis = - sum(
+            logsumexp(np.vstack((Q + self._temperature * hij, -ones((1, Q.shape[1])) * self._chemPot_gamma)), axis=0))
         term4_bis = - sum(Q.shape) * self._chemPot_gamma
         logsumexp_energy = term1_bis + term2_bis + term3_bis + term4_bis
 
-        return logsumexp_energy/self._temperature
+        return logsumexp_energy / self._temperature
 
 
 class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
@@ -1719,10 +1763,10 @@ class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
     """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + exp(-self._chemPot_mu))/self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)) \
-                       + exp(-self._chemPot_mu))/self._temperature
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + exp(-self._chemPot_mu)) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
+                       + exp(-self._chemPot_mu)) / self._temperature
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -1743,13 +1787,15 @@ class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
         '''
 
         # logsumexp version, no constant term
-        #gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
-        term1_bis = + sum(np.logaddexp(0, Q + self._temperature*hij + self._temperature*hji))
-        term2_bis = - sum(logsumexp(np.hstack((Q + self._temperature*hji, -ones((Q.shape[0], 1))*self._chemPot_mu)), axis=1))
-        term3_bis = - sum(logsumexp(np.vstack((Q + self._temperature*hij, -ones((1, Q.shape[1]))*self._chemPot_mu)), axis=0))
+        # gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
+        term1_bis = + sum(np.logaddexp(0, Q + self._temperature * hij + self._temperature * hji))
+        term2_bis = - sum(
+            logsumexp(np.hstack((Q + self._temperature * hji, -ones((Q.shape[0], 1)) * self._chemPot_mu)), axis=1))
+        term3_bis = - sum(
+            logsumexp(np.vstack((Q + self._temperature * hij, -ones((1, Q.shape[1])) * self._chemPot_mu)), axis=0))
         logsumexp_energy = term1_bis + term2_bis + term3_bis
 
-        return logsumexp_energy/self._temperature
+        return logsumexp_energy / self._temperature
 
 
 class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
@@ -1761,14 +1807,16 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         '''Poissonian probability for x particles to appear between frames given Delta=M-N
         and blinking parameters mu_on and mu_off. Consult the article for reference'''
         mu_off = N * self._p_off
-        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
             mu_on = self._region_mu_on
-        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
             mu_on = self._index_to_infer_mu_on
         else:
             raise ValueError(f"Either phimu has a non admissible value, or the code shouldn't have come here")
         return (self._index_to_infer_mu_on * mu_off) ** (x - Delta / 2.) / (
-                g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
 
     def lnp_m(self, x, Delta, N):
         """
@@ -1779,14 +1827,16 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         :return:
         """
         mu_off = N * self._p_off
-        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
             mu_on = self._region_mu_on
-        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
             mu_on = self._index_to_infer_mu_on
         else:
             raise ValueError(f"Either phimu has a non admissible value, or the code shouldn't have come here")
-        return log(self._index_to_infer_mu_on * mu_off)*(x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
-            - log(iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+        return log(self._index_to_infer_mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+               - log(iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
 
     def Q_ij(self, n_off, n_on, dr, frame_index):
         """
@@ -1840,7 +1890,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         :param n_off:
         :return:
         """
-        assert(N_in+n_on == M_in+n_off)  # equilibrium condition
+        assert (N_in + n_on == M_in + n_off)  # equilibrium condition
         out_i = zeros(shape) + exp(-self._chemPot_mu)
         out_j = zeros(shape) + exp(-self._chemPot_mu)
         if self._hex_phimu == "phi" or self._hex_phimu == "":
@@ -1849,8 +1899,8 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         if self._ring_phimu == "phi" or self._ring_phimu == "":
             out_i[N_in:N, :] = 0
             out_j[:, M_in:M] = 0
-        out_i[N:(N+n_on), :] = 0
-        out_j[:, M:(M+n_off)] = 0
+        out_i[N:(N + n_on), :] = 0
+        out_j[:, M:(M + n_off)] = 0
         self.exp_mu_i = out_i
         self.exp_mu_j = out_j
 
@@ -1865,21 +1915,27 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
         M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
         N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
-        if (self._hex_phimu == "phi" or self._hex_phimu =="phimu") and (self._ring_phimu == "phi" or self._ring_phimu =="phimu"):
+        if (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
             delta = M - N
-        elif (self._hex_phimu == "phi" or self._hex_phimu =="phimu") and not(self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+        elif (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and not (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
             delta = M_index_to_infer - N_index_to_infer
-        elif not(self._hex_phimu == "phi" or self._hex_phimu =="phimu") and (self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+        elif not (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
             delta = M - N - (M_index_to_infer - N_index_to_infer)
-        elif not(self._hex_phimu == "phi" or self._hex_phimu =="phimu") and not(self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
-            raise ValueError(f"Either the phimu argument is not admissible or the code should never have reached this place")
+        elif not (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and not (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+            raise ValueError(
+                f"Either the phimu argument is not admissible or the code should never have reached this place")
         if self._cutoff_low_p_non is False:
-            raise(f"Error: Need to set _exp_mu first")
-            mlnL = -logsumexp([log(self.p_m(n_on, delta_index_to_infer, N_index_to_infer)) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+            raise (f"Error: Need to set _exp_mu first")
+            mlnL = -logsumexp([log(self.p_m(n_on, delta_index_to_infer, N_index_to_infer)) + lng(M + 1 - n_on) - lng(
+                M + 1) - lng(N + 1) \
                                - self.sum_product_energy(dr, frame_index, n_on, n_on - delta_index_to_infer, N, M) \
                                for n_on in range(max([0, int(delta_index_to_infer)]), int(M_index_to_infer))])
         else:
-            assert(self._cutoff_low_p_non is True)
+            assert (self._cutoff_low_p_non is True)
             self.vprint(4, f"M = {M_index_to_infer} \t N = {N_index_to_infer} \t delta = {delta}")
             noff_array = []
             for n_on in range(max([0, int(delta)]), int(M_index_to_infer)):
@@ -1887,7 +1943,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
                 # import pdb; pdb.set_trace()
                 p = self.lnp_m(n_on, delta, N_index_to_infer)
                 if p == np.inf or p == -np.inf or p == np.nan:
-                    raise(f"Numerical Error, p={p}")
+                    raise (f"Numerical Error, p={p}")
                 self.vprint(4, f"n_on={n_on} \t p={p}")
                 if p > self._cutoff_log_threshold and self._cutoff_low_p_non is True:
                     self.compute_exp_mu_i_and_mu_j((N + n_on, M + n_off), N_index_to_infer, M_index_to_infer,
@@ -1902,7 +1958,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
                 mlnL = -logsumexp(np.array(noff_array))
             except ValueError:
                 pass
-                #import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
         return mlnL
 
     def marginal_minusLogLikelihood(self, dr, frame_index):
@@ -1913,7 +1969,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         :param frame_index: the index of the current frame
         :return: the minus log-likelihood between frame frame_index and frame frame_index+1
         """
-        #self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
+        # self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
         self.vprint(3, ".", end_='')
         M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
         N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
@@ -1932,7 +1988,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         elif ((self._p_off == 0.) & (self._mu_on == 0.) & (delta == 0)) or (self._phantom_particles is False):
             # Q = self.Q_ij(0, 0, dr, frame_index)
             mlnL = self.sum_product_energy(dr, frame_index, 0, 0, N, M)
-            #self.vprint(3,f"mlnL={mlnL}")
+            # self.vprint(3,f"mlnL={mlnL}")
         elif self._phantom_particles is True:
             mlnL = self.marginal_minusLogLikelihood_phantom(dr, frame_index)
         else:
@@ -1940,14 +1996,14 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         return mlnL
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        #try:
-        hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + self.exp_mu_i)/self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)) \
-                       + self.exp_mu_j)/self._temperature
-       #except RuntimeWarning:
-            #pass
-            #import pdb; pdb.set_trace()
+        # try:
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + self.exp_mu_i) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
+                       + self.exp_mu_j) / self._temperature
+        # except RuntimeWarning:
+        # pass
+        # import pdb; pdb.set_trace()
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -1959,7 +2015,7 @@ class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
         :return: The Bethe free energy
         """
         # We use logsumexp to avoid numerical underflow or overflow problems. The two versions do return different results and the logsumexp version gives realistic results on instances where the naive versions gives abusive results
-        assert(self._temperature == 1)
+        assert (self._temperature == 1)
 
         # Naive version
         term1 = + sum(log(1. + exp(Q + hij + hji)))
@@ -1990,7 +2046,7 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         and blinking parameters mu_on and mu_off. Consult the article for reference'''
         mu_off = N * self._p_off
         return (self._index_to_infer_mu_on * mu_off) ** (x - Delta / 2.) / (
-                g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
 
     def lnp_m(self, x, Delta, N):
         """
@@ -2001,8 +2057,8 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         :return:
         """
         mu_off = N * self._p_off
-        return log(self._index_to_infer_mu_on * mu_off)*(x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
-            - log(iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+        return log(self._index_to_infer_mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+               - log(iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
 
     def Q_ij(self, n_off, n_on, dr, frame_index):
         """
@@ -2062,15 +2118,15 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         :param n_off:
         :return:
         """
-        assert(N_in+n_on == M_in+n_off)  # equilibrium condition
+        assert (N_in + n_on == M_in + n_off)  # equilibrium condition
         out = zeros(shape) + exp(-self._chemPot_mu)
         out[:N_in, :] = 0
-        out[N:(N+n_on), :] = 0
+        out[N:(N + n_on), :] = 0
         self.exp_mu_i = out
 
         out = zeros(shape) + exp(-self._chemPot_mu)
         out[:, :M_in] = 0
-        out[:, M:(M+n_off)] = 0
+        out[:, M:(M + n_off)] = 0
         self.exp_mu_j = out
 
     def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
@@ -2086,12 +2142,13 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
         delta_index_to_infer = M_index_to_infer - N_index_to_infer
         if self._cutoff_low_p_non is False:
-            raise(f"Error: Need to set _exp_mu first")
-            mlnL = -logsumexp([log(self.p_m(n_on, delta_index_to_infer, N_index_to_infer)) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+            raise (f"Error: Need to set _exp_mu first")
+            mlnL = -logsumexp([log(self.p_m(n_on, delta_index_to_infer, N_index_to_infer)) + lng(M + 1 - n_on) - lng(
+                M + 1) - lng(N + 1) \
                                - self.sum_product_energy(dr, frame_index, n_on, n_on - delta_index_to_infer, N, M) \
                                for n_on in range(max([0, int(delta_index_to_infer)]), int(M_index_to_infer))])
         else:
-            assert(self._cutoff_low_p_non is True)
+            assert (self._cutoff_low_p_non is True)
             self.vprint(4, f"M = {M_index_to_infer} \t N = {N_index_to_infer} \t delta = {delta_index_to_infer}")
             noff_array = []
             for n_on in range(max([0, int(delta_index_to_infer)]), int(M_index_to_infer)):
@@ -2104,7 +2161,8 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
                 if p > self._cutoff_log_threshold and self._cutoff_low_p_non is True:
                     self.compute_exp_mu_i_and_mu_j((N + n_on, M + n_off), N_index_to_infer, M_index_to_infer,
                                                    N, M, n_on, n_off)
-                    val = self.lnp_m(n_on, delta_index_to_infer, N_index_to_infer) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                    val = self.lnp_m(n_on, delta_index_to_infer, N_index_to_infer) + lng(M + 1 - n_on) - lng(
+                        M + 1) - lng(N + 1) \
                           - self.sum_product_energy(dr, frame_index, n_on, n_on - delta_index_to_infer, N, M)
                     # self.vprint(4,f"lnL_non={n_on} = {val}")
                     noff_array.append(val)
@@ -2114,7 +2172,7 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
                 mlnL = -logsumexp(np.array(noff_array))
             except ValueError:
                 pass
-                #import pdb; pdb.set_trace()
+                # import pdb; pdb.set_trace()
         return mlnL
 
     def marginal_minusLogLikelihood(self, dr, frame_index):
@@ -2125,7 +2183,7 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         :param frame_index: the index of the current frame
         :return: the minus log-likelihood between frame frame_index and frame frame_index+1
         """
-        #self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
+        # self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
         self.vprint(3, ".", end_='')
         M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
         N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
@@ -2136,13 +2194,13 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
             mlnL = 0.  # if the cell to infer is empty in one frame, we gain 0 information
         elif M_index_to_infer == 1 and N_index_to_infer == 1 and (M == 1 or N == 1):
             # The two extra limit cases in the PhanPot method
-            mlnL = self.Q_ij(0, 0, dr, frame_index)[0,0] \
-                   + (M-1)*exp(-self._chemPot_mu) \
-                   + (N-1)*exp(-self._chemPot_mu)
+            mlnL = self.Q_ij(0, 0, dr, frame_index)[0, 0] \
+                   + (M - 1) * exp(-self._chemPot_mu) \
+                   + (N - 1) * exp(-self._chemPot_mu)
         elif ((self._p_off == 0.) & (self._mu_on == 0.) & (delta == 0)) or (self._phantom_particles is False):
             # Q = self.Q_ij(0, 0, dr, frame_index)
             mlnL = self.sum_product_energy(dr, frame_index, 0, 0, N, M)
-            #self.vprint(3,f"mlnL={mlnL}")
+            # self.vprint(3,f"mlnL={mlnL}")
         elif self._phantom_particles is True:
             mlnL = self.marginal_minusLogLikelihood_phantom(dr, frame_index)
         else:
@@ -2150,14 +2208,14 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         return mlnL
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        #try:
-        hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + self.exp_mu_i)/self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)) \
-                       + self.exp_mu_j)/self._temperature
-       #except RuntimeWarning:
-            #pass
-            #import pdb; pdb.set_trace()
+        # try:
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + self.exp_mu_i) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
+                       + self.exp_mu_j) / self._temperature
+        # except RuntimeWarning:
+        # pass
+        # import pdb; pdb.set_trace()
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -2169,13 +2227,12 @@ class NonTrackingInferrerRegionBPchemPotPartialChertkov(NonTrackingInferrerRegio
         :return: The Bethe free energy
         """
         # We use logsumexp to avoid numerical underflow or overflow problems. The two versions do return different results and the logsumexp version gives realistic results on instances where the naive versions gives abusive results
-        assert(self._temperature == 1)
-
+        assert (self._temperature == 1)
 
         # Naive version
         term1 = + sum(log(1. + exp(Q + hij + hji)))
-        term2 = - sum(log(self.exp_mu_i[:,0] + sum(exp(Q + hji), axis=1)))
-        term3 = - sum(log(self.exp_mu_j[0,:] + sum(exp(Q + hij), axis=0)))
+        term2 = - sum(log(self.exp_mu_i[:, 0] + sum(exp(Q + hji), axis=1)))
+        term3 = - sum(log(self.exp_mu_j[0, :] + sum(exp(Q + hij), axis=0)))
         naive_energy = term1 + term2 + term3
 
         # logsumexp version, no constant term
@@ -2297,7 +2354,7 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
 
         self._local_indices = region_indices
         self._region_indices = self.create_global_indices()
-        #assert (np.all(self._local_indices == self._region_indices[range(len(self._local_indices))])) # The region's indices must be at the first place # fixme: Assertion error because indices are not in the right order
+        # assert (np.all(self._local_indices == self._region_indices[range(len(self._local_indices))])) # The region's indices must be at the first place # fixme: Assertion error because indices are not in the right order
         assert (self._index_to_infer == self._local_indices[0])
 
         # self._diffusivityMatrix = self.buildDiffusivityMatrix() # maybe not needed yet
@@ -2320,10 +2377,10 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
 
         self._hij = [None] * self._particle_count.shape[1]
         self._hji = [None] * self._particle_count.shape[1]
-        for f in arange(len(self._hij)-1):
+        for f in arange(len(self._hij) - 1):
             M = np.sum(self._particle_count[self._region_indices, f + 1]).astype(int)
-            self._hij[f] = [None] * (M+1)
-            self._hji[f] = [None] * (M+1)
+            self._hij[f] = [None] * (M + 1)
+            self._hji[f] = [None] * (M + 1)
 
         self.optimizer_first_iteration = True
         self.global_update_rule_bis = False
@@ -2335,7 +2392,7 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
             First the cell to infer, then the regional indices and lastly the rest.
         :return: the array of indices
         """
-        #global_indices = np.insert(region_indices, 0, index_to_infer)  # insert i in the 0th position
+        # global_indices = np.insert(region_indices, 0, index_to_infer)  # insert i in the 0th position
         global_indices = self.get_neighbours(self._index_to_infer, order='all')
         global_indices = np.insert(global_indices, 0, self._index_to_infer)
 
@@ -2346,52 +2403,54 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         global_indices = array(global_indices)
 
         for i in self._local_indices:
-            global_indices = np.insert(global_indices, 0, i)  # insert i in the 0th position to ensure local indices come first
+            global_indices = np.insert(global_indices, 0,
+                                       i)  # insert i in the 0th position to ensure local indices come first
 
         global_indices = list(dict.fromkeys(list(global_indices)))
         global_indices.remove(self._index_to_infer)
         global_indices = list(map(int, global_indices))
         global_indices = array(global_indices)
 
-        global_indices = np.insert(global_indices, 0, self._index_to_infer)  # insert self._index_to_infer in the 0th position
+        global_indices = np.insert(global_indices, 0,
+                                   self._index_to_infer)  # insert self._index_to_infer in the 0th position
         return global_indices
 
     def particle_count_local(self):
-            """
-                Used for __init__ of nonTrackingInferrerRegion
-            :return: The matrix of particle numbers in the cells. First w.r.t cells, then w.r.t times
-            """
+        """
+            Used for __init__ of nonTrackingInferrerRegion
+        :return: The matrix of particle numbers in the cells. First w.r.t cells, then w.r.t times
+        """
 
-            # Step 1: Compute the times
-            r_total = []
-            t_total = []
-            S_total = 0
-            index = list(self._cells.keys())
-            for j in self._local_indices:
-                cell = self._cells[j]
-                r = cell.r
-                t = cell.t
-                S = cell.volume
-                r_total.extend(r)
-                t_total.extend(t)
-                S_total += S
-            r_total = np.array(r_total)
-            t_total = np.array(t_total)
-            # List of times corresponding to frames:
-            times = np.arange(min(t_total), max(t_total + self._dt / 100.), self._dt)
+        # Step 1: Compute the times
+        r_total = []
+        t_total = []
+        S_total = 0
+        index = list(self._cells.keys())
+        for j in self._local_indices:
+            cell = self._cells[j]
+            r = cell.r
+            t = cell.t
+            S = cell.volume
+            r_total.extend(r)
+            t_total.extend(t)
+            S_total += S
+        r_total = np.array(r_total)
+        t_total = np.array(t_total)
+        # List of times corresponding to frames:
+        times = np.arange(min(t_total), max(t_total + self._dt / 100.), self._dt)
 
-            # Step 2: Compute the particle number
-            particle_number = np.zeros((len(self._local_indices), len(times)))
-            print(f"global_indices={index}")
-            for j in range(len(self._local_indices)):
-                cell = self._cells[j]
-                r = cell.r
-                t = cell.t
-                frames_j = self.rt_to_frames(r, t, times)
-                N_j = [len(frame) for frame in frames_j]
-                particle_number[j, :] = N_j
+        # Step 2: Compute the particle number
+        particle_number = np.zeros((len(self._local_indices), len(times)))
+        print(f"global_indices={index}")
+        for j in range(len(self._local_indices)):
+            cell = self._cells[j]
+            r = cell.r
+            t = cell.t
+            frames_j = self.rt_to_frames(r, t, times)
+            N_j = [len(frame) for frame in frames_j]
+            particle_number[j, :] = N_j
 
-            return particle_number
+        return particle_number
 
     def sum_product_BP(self, Q, hij, hji, frame_index):
         """
@@ -2408,8 +2467,8 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
         # Bethe = [F_BP_old]
-        #self.vprint(4,"")
-        #assert(self._temperature==1) # not putting a temperature in the implementation leads to a speed-up of around 25%
+        # self.vprint(4,"")
+        # assert(self._temperature==1) # not putting a temperature in the implementation leads to a speed-up of around 25%
         boolean_matrix = self.boolean_matrix(Q.shape[0])
         for n in range(self._maxiter):
             force_global = False
@@ -2421,20 +2480,20 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
                     hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
                     hij_old = hij
                     hji_old = hji
-                    #self.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
+                    # self.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
             else:
                 hij_new, hji_new = self.sum_product_update_rule_chooser(Q, hij, hji, frame_index, force_global)
                 hij = (1. - self._gamma) * hij_new + self._gamma * hij_old
                 hji = (1. - self._gamma) * hji_new + self._gamma * hji_old
             # Stopping condition Bethe free energy:
             start = timeit.default_timer()
-            F_BP = + sum(np.logaddexp(0,Q + hij + hji)) \
+            F_BP = + sum(np.logaddexp(0, Q + hij + hji)) \
                    - sum(logsumexp(Q + hji, axis=1)) \
                    - sum(logsumexp(Q + hij, axis=0))
-            #self.vprint(4, f"Bethe time \t\t= {(timeit.default_timer() - start) * 1000} ms")
+            # self.vprint(4, f"Bethe time \t\t= {(timeit.default_timer() - start) * 1000} ms")
             self.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij||={np.linalg.norm(hij_old - hij)}\r", end_="")
             if abs(F_BP - F_BP_old) < self._epsilon:
-                self.vprint(4,"")
+                self.vprint(4, "")
                 break
             if F_BP is np.nan:
                 raise FunctionEvaluation(f"Bethe energy got value nan")
@@ -2467,7 +2526,7 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
             hij, hji = self.initialize_messages_in_a_smart_way(N, M, n_on, n_off, frame_index)
             Q = self.Q_ij(n_off, n_on, dr, frame_index)
             F_BP, hij, hji, n = self.sum_product_BP(Q, hij, hji, frame_index)
-            self.set_hij(hij,frame_index,n_on)
+            self.set_hij(hij, frame_index, n_on)
             self.set_hji(hji, frame_index, n_on)
             if n == self._maxiter - 1:
                 self.vprint(1, f"Warning: BP attained maxiter before converging.")
@@ -2501,34 +2560,34 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         """
 
         N_local = sum(self._particle_count[self._local_indices, frame_index]).astype(int)
-        M_local = sum(self._particle_count[self._local_indices, frame_index+1]).astype(int)
+        M_local = sum(self._particle_count[self._local_indices, frame_index + 1]).astype(int)
         # TODO: 1) O(n) implementation by diluting long edges
         #       2) --> **Implementation keeping faraway messages constant**
         start = timeit.default_timer()
         # Hij
-        A = exp(Q + self._temperature*hji_old)
-        A11 = A[0:N_local,0:M_local]
-        A12 = A[0:N_local,M_local+1:]
+        A = exp(Q + self._temperature * hji_old)
+        A11 = A[0:N_local, 0:M_local]
+        A12 = A[0:N_local, M_local + 1:]
         B = self.boolean_matrix(Q.shape[1])
-        B21 = B[M_local+1:,0:M_local]
+        B21 = B[M_local + 1:, 0:M_local]
         hij_new = hij_old
-        hij_new[0:N_local,0:M_local] = -log(dot(A11,self.boolean_matrix(M_local)) + dot(A12,B21))
+        hij_new[0:N_local, 0:M_local] = -log(dot(A11, self.boolean_matrix(M_local)) + dot(A12, B21))
 
         # Hji
-        A = exp(Q + self._temperature*hij_old)
-        A11 = A[0:N_local,0:M_local]
-        A12 = A[0:N_local,M_local+1:]
+        A = exp(Q + self._temperature * hij_old)
+        A11 = A[0:N_local, 0:M_local]
+        A12 = A[0:N_local, M_local + 1:]
         B = self.boolean_matrix(Q.shape[1])
-        B11 = B[0:M_local,0:M_local]
-        B21 = B[M_local+1:,0:M_local]
+        B11 = B[0:M_local, 0:M_local]
+        B21 = B[M_local + 1:, 0:M_local]
         hji_new = hji_old
-        hji_new[0:N_local,0:M_local] = -log( dot(A11,B11) + dot(A12,B21) )
+        hji_new[0:N_local, 0:M_local] = -log(dot(A11, B11) + dot(A12, B21))
 
-        #hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
-        #hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
-        self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
+        # hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
+        # hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
+        self.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
         # logdotexp update
-        #hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
+        # hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
         return hij_new, hji_new
 
     def sum_product_update_rule_local_bis(self, Q, hij_old, hji_old, frame_index):
@@ -2550,20 +2609,20 @@ class NonTrackingInferrerRegionGlobal(NonTrackingInferrerRegion):
         N_local = sum(self._particle_count[self._local_indices, frame_index]).astype(int)
         start = timeit.default_timer()
         # Hij
-        A1 = exp(Q + hji_old)[0:N_local,:]
+        A1 = exp(Q + hji_old)[0:N_local, :]
         hij_new = hij_old
-        hij_new[0:N_local,:] = -log(dot(A1,self.boolean_matrix(Q.shape[1])))
+        hij_new[0:N_local, :] = -log(dot(A1, self.boolean_matrix(Q.shape[1])))
 
         # Hji
-        A1 = exp(Q + hij_old)[0:N_local,:]
+        A1 = exp(Q + hij_old)[0:N_local, :]
         hji_new = hji_old
-        hji_new[0:N_local,:] = -log(dot(A1,self.boolean_matrix(Q.shape[1])))
+        hji_new[0:N_local, :] = -log(dot(A1, self.boolean_matrix(Q.shape[1])))
 
-        #hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
-        #hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
-        self.vprint(4,f"sum-product time \t= {(timeit.default_timer()-start)*1000} ms")
+        # hij_new = -log(dot(exp(Q + self._temperature*hji_old), self.boolean_matrix(Q.shape[1])))/self._temperature
+        # hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature*hij_old)))/self._temperature
+        self.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
         # logdotexp update
-        #hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
+        # hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
         return hij_new, hji_new
 
 
@@ -2581,6 +2640,7 @@ class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
         It is naïve in the sense that it avoids a priori unneccesarily complicated formulations.
         It is theoretically justified in a weak sense detailed in the report.
     """
+
     def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
         # self._stored_hij[frame_index] = [None] * (M - max([0, int(Delta)]))
         '''
@@ -2625,7 +2685,7 @@ class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
         out = zeros([n_on + N, n_off + M])
         LM = ones([n_on + N, n_off + M])  # * self._region_area
         lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
-        out[:N, :M] = lnp - log(LM[:N, :M] / (1-self._parent_p_off))
+        out[:N, :M] = lnp - log(LM[:N, :M] / (1 - self._parent_p_off))
         if self._correct_p_off_MC is True:
             out[:N, M:] = -log(LM[:N, M:] / self._p_off)
             out[N:, :M] = -log(LM[N:, :M] * self._region_area / self._p_off)
@@ -2637,7 +2697,7 @@ class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
         out[N:, M:] = 2. * self._minlnL  # Note: Why not 0 ??
         naive_sum_non = False
         if naive_sum_non is False:
-            out[N:, M:] = (1-self._parent_p_off)
+            out[N:, M:] = (1 - self._parent_p_off)
         return out
 
     def MPAscore(self, dr, frame_index):
