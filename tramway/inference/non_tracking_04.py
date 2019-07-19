@@ -972,8 +972,7 @@ class NonTrackingInferrerRegion(JobStep):
             hji = (1. - self._workspace._gamma) * hji_new + self._workspace._gamma * hji_old
             # Stopping condition:
             F_BP = self.bethe_free_energy(hij, hji, Q)
-            self._workspace.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(
-                hij_old - hij_new)}\r", end_="")
+            self._workspace.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old - hij_new)}\r", end_="")
             if abs(F_BP - F_BP_old) < self._workspace._epsilon:
                 self._workspace.vprint(4, "")
                 break
@@ -1287,6 +1286,244 @@ class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
         logsumexp_energy = term1_bis + term2_bis + term3_bis
 
         return logsumexp_energy / self._temperature
+
+
+class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
+    """
+        Implements the class of phimu methods with all possible combinations of phantom and chemical potential in the inner hex and outer rings
+    """
+
+    def p_m(self, x, Delta, N):
+        '''Poissonian probability for x particles to appear between frames given Delta=M-N
+        and blinking parameters mu_on and mu_off. Consult the article for reference'''
+        mu_off = N * self._p_off
+        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+            mu_on = self._region_mu_on
+        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+            mu_on = self._index_to_infer_mu_on
+        else:
+            raise ValueError(f"Either phimu has a non admissible value, or the code shouldn't have come here")
+        return (self._index_to_infer_mu_on * mu_off) ** (x - Delta / 2.) / (
+            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+
+    def lnp_m(self, x, Delta, N):
+        """
+            The logarithm of `p_m`
+        :param x: The value of which we want to evaluate the probability
+        :param Delta: The observed particle number difference
+        :param N: The number of particles in the first frame
+        :return:
+        """
+        mu_off = N * self._p_off
+        if (self._ring_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+            mu_on = self._region_mu_on
+        elif (self._ring_phimu == "" or self._hex_phimu == "mu") and (
+            self._hex_phimu == "phi" or self._hex_phimu == "phimu"):
+            mu_on = self._index_to_infer_mu_on
+        else:
+            raise ValueError(f"Either phimu has a non admissible value, or the code shouldn't have come here")
+        return log(self._index_to_infer_mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+               - log(iv(Delta, 2 * sqrt(self._index_to_infer_mu_on * mu_off)))
+
+    def Q_ij(self, n_off, n_on, dr, frame_index):
+        """
+        Matrix of log-probabilities for assignments with appearances and disappearances.
+        :param n_off: The number of disappearing particles
+        :param n_on:  The number of appearing particles
+        :param dr:  The displacement vectors
+        :param frame_index: The index of the current frame
+        :return: The square matrix Q_ij of size N + n_on - n_off
+        """
+        n_on = int(n_on)
+        n_off = int(n_off)
+        M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
+        N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
+        N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
+        if self._phantom_particles is True:
+            assert (M_index_to_infer == N_index_to_infer - n_off + n_on)
+        out = zeros([n_on + N, n_off + M])  # initializing the returned matrix with the right size
+        LM = ones([n_on + N, n_off + M]) * self._region_area
+        lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
+
+        # common part
+        out[:N, :M] = lnp - log(LM[:N, :M])  # Q part (top left)
+        out[N:, M:] = 2. * self._minlnL  # bottom right
+
+        # dependent part
+        if self._hex_phimu == "phi" or self._hex_phimu == "phimu":
+            out[:N_index_to_infer, M:] = -log(LM[:N_index_to_infer, M:])  # top right
+            out[N:, :M_index_to_infer] = -log(LM[N:, :M_index_to_infer])  # bottom left
+        else:
+            out[:N_index_to_infer, M:] = 2. * self._minlnL  # middle right
+            out[N:, :M_index_to_infer] = 2. * self._minlnL  # bottom middle
+        if self._ring_phimu == "phi" or self._ring_phimu == "phimu":
+            out[N_index_to_infer:, M:] = -log(LM[N_index_to_infer:, M:])  # middle right
+            out[N:, M_index_to_infer:] = -log(LM[N:, M_index_to_infer:])  # bottom middle
+        else:
+            out[N_index_to_infer:, M:] = 2. * self._minlnL  # middle right
+            out[N:, M_index_to_infer:] = 2. * self._minlnL  # bottom middle
+        return out
+
+    def compute_exp_mu_i_and_mu_j(self, shape, N_in, M_in, N, M, n_on, n_off):
+        """
+            Computes the chemical potential matrices for i and j.
+        :param shape: The shape of the exp_mu matrices
+        :param N_in:
+        :param M_in:
+        :param N:
+        :param M:
+        :param n_on:
+        :param n_off:
+        :return:
+        """
+        assert (N_in + n_on == M_in + n_off)  # equilibrium condition
+        out_i = zeros(shape) + exp(-self._chemPot_mu)
+        out_j = zeros(shape) + exp(-self._chemPot_mu)
+        if self._hex_phimu == "phi" or self._hex_phimu == "":
+            out_i[:N_in, :] = 0
+            out_j[:, :M_in] = 0
+        if self._ring_phimu == "phi" or self._ring_phimu == "":
+            out_i[N_in:N, :] = 0
+            out_j[:, M_in:M] = 0
+        out_i[N:(N + n_on), :] = 0
+        out_j[:, M:(M + n_off)] = 0
+        self.exp_mu_i = out_i
+        self.exp_mu_j = out_j
+
+    def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
+        """
+            Computes the marginal minus log-likelihood, marginalizing over phantom particles
+        :param dr: The distance matrix for frame_index
+        :param frame_index: The current frame index
+        :return:
+        """
+        M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
+        N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
+        N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
+        if (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+            delta = M - N
+        elif (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and not (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+            delta = M_index_to_infer - N_index_to_infer
+        elif not (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+            delta = M - N - (M_index_to_infer - N_index_to_infer)
+        elif not (self._hex_phimu == "phi" or self._hex_phimu == "phimu") and not (
+            self._ring_phimu == "phi" or self._ring_phimu == "phimu"):
+            raise ValueError(
+                f"Either the phimu argument is not admissible or the code should never have reached this place")
+        if self._cutoff_low_p_non is False:
+            raise (f"Error: Need to set _exp_mu first")
+            mlnL = -logsumexp([log(self.p_m(n_on, delta_index_to_infer, N_index_to_infer)) + lng(M + 1 - n_on) - lng(
+                M + 1) - lng(N + 1) \
+                               - self.sum_product_energy(dr, frame_index, n_on, n_on - delta_index_to_infer, N, M) \
+                               for n_on in range(max([0, int(delta_index_to_infer)]), int(M_index_to_infer))])
+        else:
+            assert (self._cutoff_low_p_non is True)
+            self.vprint(4, f"M = {M_index_to_infer} \t N = {N_index_to_infer} \t delta = {delta}")
+            noff_array = []
+            for n_on in range(max([0, int(delta)]), int(M_index_to_infer)):
+                n_off = n_on - delta
+                # import pdb; pdb.set_trace()
+                p = self.lnp_m(n_on, delta, N_index_to_infer)
+                if p == np.inf or p == -np.inf or p == np.nan:
+                    raise (f"Numerical Error, p={p}")
+                self.vprint(4, f"n_on={n_on} \t p={p}")
+                if p > self._cutoff_log_threshold and self._cutoff_low_p_non is True:
+                    self.compute_exp_mu_i_and_mu_j((N + n_on, M + n_off), N_index_to_infer, M_index_to_infer,
+                                                   N, M, n_on, n_off)
+                    val = self.lnp_m(n_on, delta, N_index_to_infer) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                          - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M)
+                    # self.vprint(4,f"lnL_non={n_on} = {val}")
+                    noff_array.append(val)
+                else:
+                    pass
+            try:
+                mlnL = -logsumexp(np.array(noff_array))
+            except ValueError:
+                pass
+                # import pdb; pdb.set_trace()
+        return mlnL
+
+    def marginal_minusLogLikelihood(self, dr, frame_index):
+        """
+            Minus-log-likelihood marginalized over possible graphs and assignments using BP.
+            in is the inside cell, out is the outside cells (array)
+        :param dr: the displacement vectors
+        :param frame_index: the index of the current frame
+        :return: the minus log-likelihood between frame frame_index and frame frame_index+1
+        """
+        # self.vprint(3, f"call: marginal_minusLogLikelihood, frame_index={frame_index}")
+        self.vprint(3, ".", end_='')
+        M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1].astype(int)
+        N_index_to_infer = self._particle_count[self._index_to_infer, frame_index].astype(int)
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
+        N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
+        delta = M - N
+        if (M_index_to_infer == 0) or (N_index_to_infer == 0):
+            mlnL = 0.  # if the cell to infer is empty in one frame, we gain 0 information
+            '''
+        elif M_index_to_infer == 1 and N_index_to_infer == 1 and (M == 1 or N == 1):
+            # The two extra limit cases in the PhanPot method
+            mlnL = self.Q_ij(0, 0, dr, frame_index)[0,0] \
+                   + (M-1)*exp(-self._chemPot_mu) \
+                   + (N-1)*exp(-self._chemPot_mu)
+            '''
+        elif ((self._p_off == 0.) & (self._mu_on == 0.) & (delta == 0)) or (self._phantom_particles is False):
+            # Q = self.Q_ij(0, 0, dr, frame_index)
+            mlnL = self.sum_product_energy(dr, frame_index, 0, 0, N, M)
+            # self.vprint(3,f"mlnL={mlnL}")
+        elif self._phantom_particles is True:
+            mlnL = self.marginal_minusLogLikelihood_phantom(dr, frame_index)
+        else:
+            raise ValueError(f"Error: check value of phantom_particles")
+        return mlnL
+
+    def sum_product_update_rule(self, Q, hij_old, hji_old):
+        # try:
+        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + self.exp_mu_i) / self._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
+                       + self.exp_mu_j) / self._temperature
+        # except RuntimeWarning:
+        # pass
+        # import pdb; pdb.set_trace()
+        return hij_new, hji_new
+
+    def bethe_free_energy(self, hij, hji, Q):
+        """
+            Computes the Bethe free energy for the Chertkov formulation
+        :param hij: left-side messages
+        :param hji: right-side messages
+        :param Q: log-likelihood matrix
+        :return: The Bethe free energy
+        """
+        # We use logsumexp to avoid numerical underflow or overflow problems. The two versions do return different results and the logsumexp version gives realistic results on instances where the naive versions gives abusive results
+        assert (self._temperature == 1)
+
+        # Naive version
+        term1 = + sum(log(1. + exp(Q + hij + hji)))
+        term2 = - sum(log(self.exp_mu_i[:, 0] + sum(exp(Q + hji), axis=1)))
+        term3 = - sum(log(self.exp_mu_j[0, :] + sum(exp(Q + hij), axis=0)))
+        naive_energy = term1 + term2 + term3
+
+        # logsumexp version, no constant term
+        # logsumexp can't work here, because exp_mu may contain zeros
+        # Possibility: Manually adapt the logsumexp algorithm
+        '''
+        term1_bis = + sum(np.logaddexp(0, Q + hij + hji))
+        term2_bis = - sum(np.logaddexp(log(self.exp_mu_i[:,0]), logsumexp(Q + hji, axis=1) ))
+        term3_bis = - sum(np.logaddexp(log(self.exp_mu_j[0,:]), logsumexp(Q + hji, axis=0) ))
+        logsumexp_energy = term1_bis + term2_bis + term3_bis
+        '''
+
+        return naive_energy
 
 
 class NonTrackingInferrerRegionBPalternativeUpdateJB(NonTrackingInferrerRegion):
