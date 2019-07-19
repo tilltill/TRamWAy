@@ -1381,3 +1381,100 @@ class NonTrackingInferrerRegionBPalternativeUpdateJB(NonTrackingInferrerRegion):
             F_BP_old = F_BP
             hij_old = hij
         return F_BP, hij, hji, n
+
+
+class NonTrackingInferrerRegionNaive(NonTrackingInferrerRegion):
+    """
+        This class implements the Naive method, where we only sum over the matching and not over non.
+        It is naive in the sense that it avoids a priori unneccesarily complicated formulations.
+        It is theoretically justified in a weak sense detailed in the report.
+    """
+
+    def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
+        """
+            Computed the marginal minus-likelihood for one frame transition with introduction of phantom particles
+        :param dr: the displacement vectors
+        :param frame_index: the index of the current frame
+        :return: the minus log-likelihood between frame frame_index and frame frame_index+1
+        """
+        # self._stored_hij[frame_index] = [None] * (M - max([0, int(Delta)]))
+        '''
+        mlnL = -logsumexp([log(self.p_m(n_on, delta, N)) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                           - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M) \
+                           for n_on in range(max([0, int(delta)]), int(M))])  # Why use lng ?
+        '''
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
+        N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
+        delta = M - N
+        n_on = int(M)  # choosing N_off such that p_on == p_off (on average... sort of)
+        self.vprint(4, f"n_on={n_on}")
+        mlnL = self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M)
+        return mlnL
+
+    def Q_ij(self, n_off, n_on, dr, frame_index):
+        """
+        Matrix of log-probabilities for assignments with appearances and disappearances.
+        Structure of Q_ij:
+         _                          _
+        | Q_11  Q_12 .. Q_1M | poff  |
+        | Q_21  Q_22 .. Q_2M | poff  |
+        |  :     :       :   |   :   |
+        | Q_N1  Q_N2 .. Q_NM | poff  |
+        |----------------------------|
+        | pon   pon  .. pon  | 1-pon |
+        |_pon   pon  .. pon  | 1-pon_|
+        :param n_off: The number of disappearing particles
+        :param n_on:  The number of appearing particles
+        :param dr:  The displacement vectors
+        :param frame_index: The index of the current frame
+        :return: The square matrix Q_ij of size N + n_on - n_off
+        """
+        n_on = int(n_on)
+        n_off = int(n_off)
+        N = np.sum(self._particle_count[self._region_indices, frame_index])
+        N = int(N)
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1])
+        M = int(M)
+        if self._phantom_particles:
+            assert (M == N - n_off + n_on)  # just a consistency check
+        out = zeros([n_on + N, n_off + M])
+        LM = ones([n_on + N, n_off + M])  # * self._region_area
+        lnp = self.minus_lq_minus_lnp_ij(dr, frame_index)
+        out[:N, :M] = lnp - log(LM[:N, :M] / (1 - self._parent_p_off))
+        if self._correct_p_off_MC is True:
+            out[:N, M:] = -log(LM[:N, M:] / self._p_off)
+            out[N:, :M] = -log(LM[N:, :M] * self._region_area / self._p_off)
+        elif self._correct_p_off_MC is False:
+            out[:N, M:] = -log(LM[:N, M:] / self.corrected_poff_array(frame_index))
+            out[N:, :M] = -log(LM[N:, :M] / self.corrected_poff_array(frame_index + 1))
+        else:
+            raise ValueError(f"Invalid value for `correct_p_off_MC`. Please choose either `True` or `False`.")
+        out[N:, M:] = 2. * self._minlnL  # Note: Why not 0 ??
+        naive_sum_non = False
+        if naive_sum_non is False:
+            out[N:, M:] = (1 - self._parent_p_off)
+        return out
+
+    def MPAscore(self, dr, frame_index):
+        """
+        :param dr: The distance matrix for frame_index
+        :param frame_index: The current frame index
+        :return: the MPAscore for frame_index
+        """
+        M_index_to_infer = self._particle_count[self._index_to_infer, frame_index + 1]
+        N_index_to_infer = self._particle_count[self._index_to_infer, frame_index]
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1])
+        N = np.sum(self._particle_count[self._region_indices, frame_index])
+        Delta = M - N
+        if (self._p_off == 0.) & (self._mu_on == 0.) & (Delta == 0):
+            Q = self.Q_ij(0, 0, dr, frame_index)
+            mpa_row, mpa_col = kuhn_munkres(-Q)
+            max_score = -self.MPA_energy(Q, mpa_row, mpa_col)
+        elif (M_index_to_infer == 0) or (N_index_to_infer == 0):
+            max_score = 0.  # if the cell to infer is empty in one frame, we gain 0 information
+        else:
+            Q = self.Q_ij(M - Delta, M, dr, frame_index)
+            mpa_row, mpa_col = kuhn_munkres(-Q)
+            E_MPA = self.MPA_energy(Q, mpa_row, mpa_col)
+            max_score = -E_MPA
+        return -max_score
