@@ -40,9 +40,69 @@ def non_tracking_04(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
         q = method['q']
     except KeyError:
         q = 0.5
+    try:
+        global_inference = method['global_inference']
+    except KeyError:
+        global_inference = False
+    try:
+        hex_phimu = method['hex_phimu']
+        ring_phimu = method['ring_phimu']
+    except KeyError:
+        hex_phimu = ""
+        ring_phimu = ""
+    try:
+        correct_p_off = method['correct_p_off']
+    except KeyError:
+        correct_p_off = False
+    try:
+        correct_p_off_MC = method['correct_p_off_MC']
+    except KeyError:
+        correct_p_off_MC = True
+    try:
+        tessellation = method['tessellation']
+    except KeyError:
+        tessellation = None
+    try:
+        dynamic_damping = method['dynamic_damping']
+        dynamic_damping_delta = method['dynamic_damping_delta']
+        dynamic_damping_gamma_min = method['dynamic_damping_gamma_min']
+    except KeyError:
+        dynamic_damping = False
+        dynamic_damping_delta = None
+        dynamic_damping_gamma_min = None
+    try:
+        MPA_max_distance_cutoff = method['MPA_max_distance_cutoff']
+    except KeyError:
+        MPA_max_distance_cutoff = np.inf
+    try:
+        smoothing = method['smoothing']
+    except KeyError:
+        smoothing = 'standard'
+    try:
+        cutoff_low_p_non = method['cutoff_low_p_non']
+    except KeyError:
+        cutoff_low_p_non = True
+    try:
+        cutoff_low_Pij = method['cutoff_low_Pij']
+    except KeyError:
+        cutoff_low_Pij = True
+    try:
+        cutoff_log_threshold = method['cutoff_log_threshold']
+    except KeyError:
+        cutoff_log_threshold = -10
+    try:
+        sparse_energy_computation = method['sparse_energy_computation']
+    except KeyError:
+        sparse_energy_computation = True
+    try:
+        sparse_energy_computation_sparsity = method['sparse_energy_computation_sparsity']
+    except KeyError:
+        sparse_energy_computation_sparsity = 5
     inferrer = NonTrackingInferrer(cells=cells,
                                    dt=dt,
+                                   tessellation=tessellation,
                                    gamma=method['gamma'],
+                                   smoothing=smoothing,
                                    smoothing_factor=method['smoothing_factor'],
                                    optimizer=method['optimizer'],
                                    tol=method['tol'],
@@ -68,6 +128,20 @@ def non_tracking_04(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
                                    cells_to_infer=method['cells_to_infer'],
                                    neighbourhood_order=method['neighbourhood_order'],
                                    minlnL=method['minlnL'],
+                                   dynamic_damping=dynamic_damping,
+                                   dynamic_damping_delta=dynamic_damping_delta,
+                                   dynamic_damping_gamma_min=dynamic_damping_gamma_min,
+                                   global_inference=global_inference,
+                                   MPA_max_distance_cutoff=MPA_max_distance_cutoff,
+                                   cutoff_low_p_non=cutoff_low_p_non,
+                                   cutoff_low_Pij=cutoff_low_Pij,
+                                   cutoff_log_threshold=cutoff_log_threshold,
+                                   sparse_energy_computation=sparse_energy_computation,
+                                   sparse_energy_computation_sparsity=sparse_energy_computation_sparsity,
+                                   hex_phimu=hex_phimu,
+                                   ring_phimu=ring_phimu,
+                                   correct_p_off=correct_p_off,
+                                   correct_p_off_MC=correct_p_off_MC,
                                    verbose=method['verbose'])
     inferrer.infer()
     return inferrer._final_diffusivities
@@ -79,6 +153,11 @@ def non_tracking_04(cells, dt=0.04, p_off=0., mu_on=0., s2=0.0025, D0=0.2, metho
     The handling of particle count and drs distance matrices is not very pleasing yet
     drift management is horrendously confusing in the argument passing of the optimizer
 '''
+
+
+class FunctionEvaluation(Exception):
+    def __init__(self, message):
+        self.message = message
 
 
 def Lq(x, q=1):
@@ -112,21 +191,39 @@ def expq(y, q=1):
         raise ValueError(f"q={q} is out of bounds.")
 
 
-def logdotexp(a, b):
+def logdot_exp_and_scalar(a, b):
     """
-        Computes log(dot(exp(a,b))) robustly. Taken from
+        Computes log(dot(exp(a),b)) robustly. Adapted from
         https://stackoverflow.com/questions/23630277/numerically-stable-way-to-multiply-log-probability-matrices-in-numpy
-    :param a:
-    :param b:
-    :return:
+        It bears the name logdot_exp_and_scalar because the first argument is raised to the exp, while the second isn't.
+    :param a: 2D np array. First argument
+    :param b: 2D np array. Second argument
+    :return: 2D np array. log( dot(exp(a), b) )
     """
-    max_a, max_b = np.max(a), np.max(b)
-    exp_a, exp_b = a - max_a, b - max_b
+    max_a = np.max(a)
+    exp_a = a - max_a
     np.exp(exp_a, out=exp_a)
-    np.exp(exp_b, out=exp_b)
-    c = np.dot(exp_a, exp_b)
+    c = np.dot(exp_a, b)
     np.log(c, out=c)
-    c += max_a + max_b
+    c += max_a
+    return c
+
+
+def logdot_scalar_and_exp(a, b):
+    """
+        Computes log(dot(a,exp(b))) robustly. Adapted from
+        https://stackoverflow.com/questions/23630277/numerically-stable-way-to-multiply-log-probability-matrices-in-numpy
+        It bears the name logdot_scalar_and_exp because the second argument is raised to the exp, while the first isn't.
+    :param a: 2D np array. First argument
+    :param b: 2D np array. Second argument
+    :return: 2D np array. log( dot(a, exp(b)) )
+    """
+    max_b = np.max(b)
+    exp_b = b - max_b
+    np.exp(exp_b, out=exp_b)
+    c = np.dot(a, exp_b)
+    np.log(c, out=c)
+    c += max_b
     return c
 
 
@@ -136,15 +233,118 @@ class NonTrackingInferrerBase:
         Stores the problem data and the algorithm parameters
     """
 
-    def __init__(self, cells, dt, gamma=0.8, smoothing_factor=0, optimizer='NM', tol=1e-3, epsilon=1e-8, maxiter=10000,
-                 phantom_particles=1, messages_type='CLV', chemPot='None', chemPot_gamma=1, chemPot_mu=1, scheme='1D',
-                 method='BP', distribution='gaussian', temperature=1, parallel=1, hij_init_takeLast=False, useLq=False,
-                 q=0.5, p_off=0, mu_on=0, starting_diffusivities=[1],
-                 starting_drifts=[0, 0], inference_mode='D', cells_to_infer='all', neighbourhood_order=1, minlnL=-100,
+    __slots__ = ('_cells',
+                 '_dt',
+                 '_tessellation',
+                 '_p_off',
+                 '_mu_on',
+                 '_cells_to_infer',
+                 '_gamma',
+                 '_smoothing',
+                 '_smoothing_factor',
+                 '_tol',
+                 '_maxiter',
+                 '_temperature',
+                 '_chemPot_gamma',
+                 '_epsilon',
+                 '_chemPot_mu',
+                 '_q',
+                 '_minlnL',
+                 '_neighbourhood_order',
+                 '_starting_diffusivities',
+                 '_starting_drifts',
+                 '_several_runs_maxiter',
+                 '_several_runs_tolerance',
+                 '_optimizer',
+                 '_scheme',
+                 '_method',
+                 '_parallel',
+                 '_phantom_particles',
+                 '_chemPot',
+                 '_messages_type',
+                 '_inference_mode',
+                 '_distribution',
+                 '_useLq',
+                 '_correct_p_off',
+                 '_hex_phimu',
+                 '_ring_phimu',
+                 '_hij_init_takeLast',
+                 '_global',
+                 '_cutoff_low_p_non',
+                 '_cutoff_low_Pij',
+                 '_cutoff_log_threshold',
+                 '_sparse_energy_computation',
+                 '_sparse_energy_computation_sparsity',
+                 '_dynamic_damping',
+                 '_dynamic_damping_delta',
+                 '_dynamic_damping_gamma_min',
+                 '_MPA_max_distance_cutoff',
+                 '_cutoff_low_p_non',
+                 '_cutoff_low_Pij',
+                 '_cutoff_log_threshold',
+                 '_sparse_energy_computation',
+                 '_sparse_energy_computation_sparsity',
+                 '_final_diffusivities',
+                 '_final_drifts',
+                 '_verbose',
+                 '_plot',
+                 '_correct_p_off_MC')
+
+    def __init__(self,
+                 cells,
+                 dt,
+                 tessellation=None,
+                 gamma=0.8,
+                 smoothing='standard',
+                 smoothing_factor=0,
+                 optimizer='NM',
+                 tol=1e-3,
+                 epsilon=1e-8,
+                 maxiter=10000,
+                 phantom_particles=1,
+                 messages_type='CLV',
+                 chemPot='None',
+                 chemPot_gamma=1,
+                 chemPot_mu=1,
+                 scheme='1D',
+                 method='BP',
+                 distribution='gaussian',
+                 temperature=1,
+                 parallel=1,
+                 hij_init_takeLast=False,
+                 useLq=False,
+                 q=0.5,
+                 p_off=0,
+                 mu_on=0,
+                 starting_diffusivities=[1],
+                 starting_drifts=[0,0],
+                 inference_mode='D',
+                 cells_to_infer='all',
+                 neighbourhood_order=1,
+                 minlnL=-100,
+                 dynamic_damping=False,
+                 dynamic_damping_delta=None,
+                 dynamic_damping_gamma_min=None,
+                 global_inference=False,
+                 MPA_max_distance_cutoff=np.inf,
+                 cutoff_low_p_non = True,
+                 cutoff_low_Pij = True,
+                 cutoff_log_threshold = -10,
+                 sparse_energy_computation = True,
+                 sparse_energy_computation_sparsity = 5,
+                 hex_phimu="",
+                 ring_phimu="",
+                 correct_p_off=False,
+                 correct_p_off_MC=True,
                  verbose=1):
         """
         :param cells: An object of type 'Distributed' containing the data tessellated into cells
+        :param dt: The time step between frames
+        :param tessellation:
         :param gamma: The damping factor of the BP. h = gamma * h_old + (1-gamma) * h_new
+        :param smoothing: 'standard': (default) Use smoothing with standard gradient implemented by tramway
+                          'heuristic': Use heuristic smoothing
+                          'None': Do not use smoothing
         :param smoothing_factor: The coefficient used in the smoothing prior
         :param optimizer: The optimizer to use. Only Nelder-Mead 'NM' is supported
         :param tol: The tolerance for the optimizer. How precise an optimum do we require ?
@@ -162,20 +362,45 @@ class NonTrackingInferrerBase:
         :param method: The marginalization method to use. Can be 'MPA' or 'BP'
         :param distribution: The likelihood-distribution to use. Can be 'gaussian' or 'rayleigh'
         :param temperature: The temperature of the BP (beta in the notes)
-        :param parallel: Boolean. If `True`, we use the parallel implementation. If False, we use the sequential implementation
-        :param hij_init_takeLast: Boolean. If True, then we initialize h_ij to its last value at the previous BP
-        :param dt: The time step between frames
+        :param parallel: Boolean. If `True`, we use the parallel implementation. If `False`, we use the sequential implementation
+        :param hij_init_takeLast: Boolean. If `True`, then we initialize `h_ij` to its last value at the previous BP
+        :param useLq: Boolean, `False` by default. If true we use Lq likelihood instead of log-likelihood
+        :param q: float, such that 0<q<1. The q parameter of the Lq-likelihood.
         :param p_off: The probability of a particle disappearing
         :param mu_on: The particle appearance intensity
         :param starting_diffusivities: The starting diffusivities serve only as an input variable. final_diffusivities is immediately initialized to starting_diffusivities
-        :param starting_drifts: NOT YET IMPLEMENTED. The starting drifts serve only as an input variable. final_drifts is immediately initialized to starting_drifts.
+        :param starting_drifts: The starting drifts serve only as an input variable. final_drifts is immediately initialized to starting_drifts.
         :param inference_mode: 'D' : Infer only diffusivity
                                'DD': Infer diffusivity and drift.
         :param final_diffusivities: NOT A PARAMETER The final diffusivities are the most up-to-date. Only to be changed at the end of an estimation
-        :param final_drifts: The final drifts are the most up-to-date. Only to be changed at the end of an estimation
+        :param final_drifts: NOT A PARAMETER The final drifts are the most up-to-date. Only to be changed at the end of an estimation
         :param cells_to_infer: An array of indices on which we want to infer
         :param neighbourhood_order: The order of the neighbourhoods for regional inference
         :param minlnL: The cut-off threshold for small probabilities
+        :param dynamic_damping: If `True` adapts the damping parameter dynamically
+        :param dynamic_damping_delta: The discount factor for dynamic damping. A float between 0 (no memory) and 1 (perfect memory)
+        :param dynamic_damping_gamma_min: The minimum threshold for the damping factor.
+        :param global_inference: If `True`, the neighbourhood of each cell is the whole population of cells
+        :param MPA_max_distance_cutoff: float, default value `inf`. Gives the maximum admissible distance for translocations.
+        :param cutoff_low_p_non: Boolean, `True` by default. If true, we cut off (to 0) all low p_non probabilities.
+        :param cutoff_low_Pij: Boolean, `True` by default. If true we cut off (to minlnL) low transition probabilities
+        :param cutoff_log_threshold: -10 by default. The log-threshold for `cutoff_low_p_non` and `cutoff_lo_Pij`.
+        :param sparse_energy_computation. Boolean, `True` by default. If `True` the Bethe energy is computed sparsely, i.e. after every N message updates.
+        :param sparse_energy_computation_sparsity: int, 5 by default. Determines how many message updates we should do before computing the energy again.
+        :param hex_phimu: In the central hex of the comb use
+                            'phi'  : phantom particles, no chemical potential
+                            'mu'   : Chemical potential, no phantom particles
+                            'phimu': Phantom particles and chemical potential
+                            ''     : Neither phantom particles, nor chemical potential
+                           Only if chemPot == 'phimu'
+        :param ring_phimu: In the outer ring(s) of the comb, use
+                            'phi'  : phantom particles, no chemical potential
+                            'mu'   : Chemical potential, no phantom particles
+                            'phimu': Phantom particles and chemical potential
+                            ''     : Neither phantom particles, nor chemical potential
+                           Only if chemPot == 'phimu'
+        :param correct_p_off: (boolean) If `True`, use the p_off correction accounting for particles leaving the region
+        :param correct_poff_MC: (boolean) If `True` and if `correct_p_off` is `True`, then poff correction is done via Monte-Carlo simulation and a mean-field approach. Otherwise, the correction is computed by numerical integration for each praticle using numerical integration.
         :param verbose: Level of verbosity.
                 0 : mute (not advised)
                 1 : introverted (advised)
@@ -185,6 +410,7 @@ class NonTrackingInferrerBase:
         # Idea to reduce the number of parameters: Put diffusivity and drift together in a pandas dataframe
         # Problem data
         self._cells = cells
+        self._tessellation = tessellation
         self._dt = dt
         self._p_off = p_off
         self._mu_on = mu_on
@@ -196,6 +422,7 @@ class NonTrackingInferrerBase:
 
         # Algorithm tuning parameters (numerical values)
         self._gamma = gamma
+        self._smoothing = smoothing
         self._smoothing_factor = smoothing_factor
         self._tol = tol
         self._maxiter = maxiter
@@ -206,6 +433,9 @@ class NonTrackingInferrerBase:
         self._q = q
         self._minlnL = minlnL
         self._neighbourhood_order = neighbourhood_order
+        self._MPA_max_distance_cutoff = MPA_max_distance_cutoff
+        if self._MPA_max_distance_cutoff == 0:
+            self.vprint(2, f"Warning: The cutoff distance is set to 0.")
         if len(starting_diffusivities) == 1:
             self._starting_diffusivities = starting_diffusivities[0] * np.ones(len(cells.keys()))
         else:
@@ -215,24 +445,44 @@ class NonTrackingInferrerBase:
             self._starting_drifts = np.tile(starting_drifts, (len(cells.keys()), 1))
         else:
             self._starting_drifts = starting_drifts
+        self._several_runs_maxiter = 1
+        self._several_runs_tolerance = 1
 
         # Methods to use (discrete values)
         self._optimizer = optimizer
         self._scheme = scheme
         self._method = method
         self._parallel = parallel
-        self._hij_init_takeLast = hij_init_takeLast
         self._phantom_particles = phantom_particles
         self._chemPot = chemPot
         self._messages_type = messages_type
         self._inference_mode = inference_mode
         self._distribution = distribution
         self._useLq = useLq
+        self._correct_p_off = correct_p_off
+        self._correct_p_off_MC = correct_p_off_MC
+
+        # Phantom particles and chemical potential Hex/Ring combinations.  possible values: "phi", "mu", "phimu", ""
+        self._hex_phimu = hex_phimu
+        self._ring_phimu = ring_phimu
+
+        # Speed-up hacks
+        self._hij_init_takeLast = hij_init_takeLast
+        self._global = global_inference
+        self._cutoff_low_p_non = cutoff_low_p_non  # True
+        self._cutoff_low_Pij = cutoff_low_Pij  # True
+        self._cutoff_log_threshold = cutoff_log_threshold  # -10
+        self._sparse_energy_computation = sparse_energy_computation  # True
+        self._sparse_energy_computation_sparsity = sparse_energy_computation_sparsity  # 5
+        self._dynamic_damping = dynamic_damping
+        self._dynamic_damping_delta = dynamic_damping_delta
+        self._dynamic_damping_gamma_min = dynamic_damping_gamma_min
 
         # Others
         self._final_diffusivities = self._starting_diffusivities
         self._final_drifts = self._starting_drifts
         self._verbose = verbose
+        self._plot = False
 
         self.check_parameters()
 
@@ -242,22 +492,52 @@ class NonTrackingInferrerBase:
         """
             This functions checks incoherent configurations and configurations that are not supported yet
         """
+        assert self._chemPot == 'Chertkov' or self._chemPot == 'Mezard' or self._chemPot == 'None', "chemPot argument is invalid"
         if self._method == 'MPA':
             assert (self._phantom_particles is True)
             assert (self._chemPot == 'None')
-        if self._chemPot == 'None':
-            assert (self._phantom_particles is True)
+        if self._scheme == '2D':
+            assert(self._neighbourhood_order == 1)
+        if self._chemPot == 'None' or self._chemPot == 'PhanPot':
+            assert self._phantom_particles is True, "Set phantom_particles to true or use chemical potential."
+        if self._chemPot == 'PhanPot':
+            self.vprint(1, f"Warning: PhanPot mode is experimental")
         if self._distribution != 'gaussian' and self._distribution != 'rayleigh':
             raise ValueError("distribution not supported")
+        if self._optimizer != 'NM':
+            raise ValueError("optimizer not supported")
         if self._messages_type == 'JB':
             assert (self._method == 'BP')
             assert (self._chemPot == 'None')
             assert (self._phantom_particles is True)
+            self.vprint(1, f"Warning: JB method is numerically unbstable")
+        if self._messages_type == 'Naive':
+            assert self._chemPot == 'None', "Naive messages currently do not support chemPot."
         if self._inference_mode == 'DD':
             assert (self._scheme == '1D')
             assert (self._parallel is False)
         if self._useLq is True:
             assert (0 < self._q < 1)
+            self.vprint(1, f"Warning: Lq method is numerically unstable")
+        if self._global is True:
+            self.vprint(1, f"Warning: global mode is experimental")
+            assert (self._method == 'BP')
+        if self._cutoff_low_Pij is True:
+            assert (self._minlnL < self._cutoff_log_threshold)
+        if self._correct_p_off is True:
+            assert (self._distribution == 'gaussian')
+            assert (self._tessellation is not None)
+        if self._dynamic_damping is True:
+            assert self._chemPot == 'None' and (self._messages_type == 'CLV' or self._messages_type == 'Naive'), "dynamic damping is not implemented for chemical potential."
+        if self._correct_p_off_MC is False:
+            assert (self._correct_p_off is True)
+        if self._MPA_max_distance_cutoff is not np.inf:
+            pass
+            # self.vprint(1, f"Warning: The cutoff is not implemented yet.")
+        if self._smoothing == 'None':
+            assert(self._smoothing_factor == 0)
+        if self._smoothing_factor == 0 and (self._smoothing == 'standard' or self._smoothing == 'heuristic'):
+            self.vprint(2, f"Warning: You chose to use standard or heuristic smoothing but your smoothing factor is 0.")
 
     def confirm_parameters(self):
         """
@@ -387,25 +667,6 @@ class NonTrackingInferrerBase:
             dr_ij[1, i] = frame2[:, 1] - frame1[i, 1]
         return dr_ij
 
-    def p_m(self, x, Delta, N):
-        '''Poissonian probability for x particles to appear between frames given Delta=M-N
-        and blinking parameters mu_on and mu_off. Consult the article for reference'''
-        mu_off = N * self._p_off
-        return (self._mu_on * mu_off) ** (x - Delta / 2.) / (
-            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._mu_on * mu_off)))
-
-    def lnp_m(self, x, Delta, N):
-        """
-            The logarithm of `p_m`
-        :param x:
-        :param Delta:
-        :param N:
-        :return:
-        """
-        mu_off = N * self._p_off
-        return log(self._mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
-               - log(iv(Delta, 2 * sqrt(self._mu_on * mu_off)))
-
     def vprint(self, level, string, end_='\n'):
         if self._verbose == 0:
             pass
@@ -486,6 +747,16 @@ class NonTrackingInferrer(NonTrackingInferrerBase):
 
         # SEQUENTIAL VERSION #
         elif self._parallel is False:
+            assert(self._inference_mode == 'D') # because drift mode is not yet totally implemented in this part
+            for i in self._cells_to_infer:
+                global_workspace = self  # fixme: split NonTrackingInferrer from NonTrackingInferrerBase
+                region = self.create_region(global_workspace, i)
+                region.estimate()
+                Dhat = region._estimates
+            self._final_diffusivities = pd.DataFrame(self._final_diffusivities,
+                                                     index=self._cells_to_infer, columns=['D'])
+
+        elif False:
             several_runs = True
             """ In the sequential method for the 1D scheme, the inferred value in cell i is assumed as the estimated
                 diffusivity of cell i when inferring cells j>i. In the parallel method, these optimizations are
@@ -558,6 +829,8 @@ class NonTrackingInferrer(NonTrackingInferrerBase):
             local_inferrer = NonTrackingInferrerRegionBPchemPotMezard(global_workspace, i, region_indices)
         elif self._chemPot == 'None' and self._messages_type == 'CLV':
             local_inferrer = NonTrackingInferrerRegion(global_workspace, i, region_indices)
+        elif self._chemPot == 'None' and self._messages_type == 'Naive':
+            local_inferrer = NonTrackingInferrerRegion(global_workspace, i, region_indices)
         elif self._chemPot == 'None' and self._messages_type == 'JB':
             local_inferrer = NonTrackingInferrerRegionBPalternativeUpdateJB(global_workspace, i, region_indices)
         else:
@@ -603,6 +876,16 @@ class NonTrackingInferrerRegion(JobStep):
 
         self.optimizer_first_iteration = True
 
+
+        self._region_mu_on = self._workspace._mu_on * np.sum(self._particle_count[self._region_indices, :]) / sum(
+            self._particle_count)
+        self._workspace.vprint(2, f"region_mu_on={self._region_mu_on}")
+        self._index_to_infer_mu_on = self._workspace._mu_on * np.sum(self._particle_count[self._index_to_infer, :]) / sum(
+            self._particle_count)
+
+        self._parent_p_off = self._workspace._p_off
+
+
     @property
     def _index_to_infer(self):
         return self.resource_id
@@ -639,21 +922,22 @@ class NonTrackingInferrerRegion(JobStep):
             return self._hij[frame][non]
         except IndexError:
             print(self._hij[frame])
-            import pdb;
-            pdb.set_trace()
+            # import pdb; pdb.set_trace()
             raise IndexError("hij index error")
 
     def set_hij(self, hij, frame, non):
         """
             Sets a value for `hij`
+        :param hij: The value to set
         :param frame: The index of the first frame of the transisiton
         :param noff: The number of disappearing particles in first frame
         """
         try:
             self._hij[frame][non] = hij
         except IndexError:
-            import pdb;
-            pdb.set_trace()
+            pass
+            # import pdb; pdb.set_trace()
+            raise IndexError("hij index error")
 
     def get_hji(self, frame, non):
         """
@@ -661,15 +945,270 @@ class NonTrackingInferrerRegion(JobStep):
         :param noff: The number of disappearing particles in first frame
         :return: The currently stored `hji` matrix for frame transition `frame` to `frame+1`
         """
-        return self._hji[frame][non]
+        try:
+            return self._hji[frame][non]
+        except IndexError:
+            print(self._hji[frame])
+            # import pdb; pdb.set_trace()
+            raise IndexError("hij index error")
 
     def set_hji(self, hji, frame, non):
         """
             Sets a value for `hji`
+        :param hji: The value to set
         :param frame: The index of the first frame of the transisiton
         :param noff: The number of disappearing particles in first frame
         """
         self._hji[frame][non] = hji
+
+    # p_off correction MC
+    def draw_p1(self, size=1):
+        """
+            Draws a point in the region from the uniform distribution
+            1. get cell center
+            2. get length of the Spokes
+            3. draw a Spoke uniformly (Not drawing a position directly keeps us independent from the inclination of the hex)
+            4. draw a random position from the uniform triangle
+            The uniform triangle having the same shape, this can be done for N draws efficiently
+            WARNING: This code relies on an implicit order in the vertices.
+                        This order gets transformed in a more natural order as shown below
+                        But if the initial order is not anymore as drawn here, the code will yield wrong results
+                            5                      3
+                        2       4      ->      2       4
+                        1       3              1       5
+                            0                      0
+        :param size: (int) number of points to ba drawn
+        :return: a 2-d np.array: the coordinate vector of the drawn point,
+                 an array of hexes in which the drawn points lie
+        """
+        # Generate uniform points in the unit square
+        x_square = np.random.uniform(low=0, high=1, size=size)
+        y_square = np.random.uniform(low=0, high=1, size=size)
+
+        # Fold the points into the triangle (half the square)
+        x_half_square = np.minimum(x_square, 1 - y_square)
+        y_half_square = np.minimum(1 - x_square, y_square)
+        x_half_square = x_half_square.reshape((-1, 1))
+        y_half_square = y_half_square.reshape((-1, 1))
+        # Generates hexes
+        hexes = np.random.choice(self._region_indices, size=size, replace=True)
+        cell_centers = self._workspace._tessellation.cell_centers
+        hex_centers = cell_centers[hexes]
+
+        # Preliminary formatting of vertex data
+        cell_vertices_as_list = [v for k, v in self._workspace._tessellation.cell_vertices.items()]
+        cell_vertices_as_array = np.asarray(cell_vertices_as_list)
+        cell_vertices_as_array.T[[3, 5]] = cell_vertices_as_array.T[[5, 3]]  # exchange the columns to fix the order
+
+        # Generates spokes
+        spokes = np.random.randint(low=0, high=6, size=size)
+        spokes_plus_one = (spokes + 1) % 6
+        hex_vertex_indices = cell_vertices_as_array[hexes, array([spokes, spokes_plus_one])].T
+        hex_chosen_vertices_y = self._workspace._tessellation.vertices[hex_vertex_indices[:, 0]]
+        hex_chosen_vertices_x = self._workspace._tessellation.vertices[hex_vertex_indices[:, 1]]
+
+        # Synthetize into p1 coordinates
+        p = hex_centers \
+            + (hex_chosen_vertices_x - hex_centers) * np.hstack((x_half_square, x_half_square)) \
+            + (hex_chosen_vertices_y - hex_centers) * np.hstack((y_half_square, y_half_square))
+        if self._workspace._plot is True:
+            fig = plt.figure()
+            plt.plot(p[:, 0], p[:, 1], 'g,', alpha=0.5)
+            plt.plot(cell_centers[:, 0], cell_centers[:, 1], 'k+')
+            for i in range(cell_vertices_as_array.shape[0]):
+                plt.plot((self._tessellation.vertices[cell_vertices_as_array[i, :]])[:, 0],
+                         (self._tessellation.vertices[cell_vertices_as_array[i, :]])[:, 1], 'r-')
+        return p, hexes
+
+    def draw_p2(self, p1, hexes, size=1):
+        """
+            Draws a p2 vector from p1
+        :param p1: The position vector from which to translocate
+        :param hexes: The indices of the hexes in which the points p1 lie
+        :param size: Number of translocations
+        :return: a 2-d np.array: The translocated vector
+        """
+
+        # draw N(0,1) samples
+        x_scaled = np.random.normal(loc=0, scale=1, size=size)
+        y_scaled = np.random.normal(loc=0, scale=1, size=size)
+        x_scaled = x_scaled.reshape((-1, 1))
+        y_scaled = y_scaled.reshape((-1, 1))
+
+        # multiply by standard deviation
+        diffusivities = self._working_diffusivities[hexes]
+        diffusivities = diffusivities.reshape((-1, 1))
+        x = x_scaled * sqrt(2 * diffusivities * self._workspace._dt)
+        y = y_scaled * sqrt(2 * diffusivities * self._workspace._dt)
+        p_transloc = np.hstack((x, y))
+
+        # add
+        p2 = p1 + p_transloc
+
+        # if self._plot is True:
+        # plt.plot(p2[:, 0], p2[:, 1], 'b.', alpha=0.5)
+
+        return p2
+
+    def is_in_cell(self, cell_index, points):
+        """
+            Checks if point `point` is in the domain of the cell `cell_index`
+
+        :param cell_index: Index of the cell to test
+        :param points: array of points to test
+        :return: (boolean) True if point is in cell
+        """
+        center = self._workspace._tessellation.cell_centers[cell_index]
+        tilt = self._workspace._tessellation.tilt  # not used yet. But should not influence the final result for current usage
+        radius = self._workspace._tessellation.hexagon_radius
+        # Use hexagon with flat top and bottom orientation $\hexagon$.
+        diff_scaled = (points - center) / radius
+        x, y = diff_scaled[:, 0], diff_scaled[:, 1]
+        # Test membership of the point in a partition of the hexagon
+        truth1 = (abs(y) <= 1 / sqrt(3)) * (abs(x) <= 1)  # middle rectangle
+        truth2 = (1 / sqrt(3) <= abs(y)) * (abs(y) <= 2 / sqrt(3)) * (
+                abs(x) <= 2 - abs(y) * sqrt(3))  # left and right triangles
+        truth = truth1 * 1 + truth2 * 1 - truth1 * truth2 * 1  # logical or
+        return truth == 1
+
+    def is_in_region(self, p2):
+        """
+            Checks if a point of coordinates (x,y) is in the region
+        :param p2: 2d-array: The points to test
+        :return: True if the point is inside the region
+        """
+        truth = np.ones(p2.shape[0]) * False
+        for i in self._region_indices:
+            truth_i = self.is_in_cell(i, p2) * 1
+            truth = truth + truth_i - truth * truth_i
+        truth = (truth == 1)
+        if self._workspace._plot is True:
+            plt.plot(p2[~truth, 0], p2[~truth, 1], 'b.')
+            plt.plot(p2[truth, 0], p2[truth, 1], 'r.')
+            plt.show()
+        return truth
+
+    def compute_p_out(self, N_draws=100000):
+        """
+            Computes the value of p_out, i.e the probability that a particle a priori uniformly distributed in the comb goes out of it.
+        :param N_draws: The sample size
+        :return: a floating value between 0 and 1
+        """
+        p1, hexes = self.draw_p1(N_draws)
+        p2 = self.draw_p2(p1, hexes, N_draws)
+        pin = sum(self.is_in_region(p2)) / len(p2)
+        assert (0 <= pin <= 1)
+        return 1 - pin
+
+    def compute_corrected_p_off(self):
+        """
+            Computes p_off including the correction due to segmenting the domain into regions
+        :return: (float) corrected p_off
+        """
+        p_out = self.compute_p_out()
+        return 1 - (1 - self._parent_p_off) * (1 - p_out)
+
+    # p_off correction integration
+    def find_xmin_xmax(self, i):
+        """
+            Find the minimal and maximal x-coordinate of cell i
+        :param i: index of the cell
+        :return: The minimum and maximum coordinates
+        """
+        xmin = self._tessellation.cell_centers[i] - self._tessellation.hexagon_radius
+        xmax = self._tessellation.cell_centers[i] - self._tessellation.hexagon_radius
+        return xmin, xmax
+
+    def ymin(self, i, x):
+        """
+            Computes the minimum y-coordinate in cell i at slice x
+        :param i: index of the cell
+        :param x: x-coordinate of the slice
+        :return: The minimum y-coordinate
+        """
+        slope = 2 * self._tessellation.hexagon_radius / sqrt(3)
+        centre = self._tessellation.cell_centers[i]
+        if x <= centre:
+            intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept - slope * x
+        elif x >= centre:
+            intercept = centre[1] - 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept + slope * x
+
+    def ymax(self, i, x):
+        """
+            Computes the maximum y-coordinate in cell i at slice x
+        :param i: index of the cell
+        :param x: x-coordinate of the slice
+        :return: The maximum y-coordinate
+        """
+        slope = 2 * self._tessellation.hexagon_radius / sqrt(3)
+        centre = self._tessellation.cell_centers[i]
+        if x <= centre:
+            intercept = centre[1] + 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept + slope * x
+        elif x >= centre:
+            intercept = centre[1] + 2 * self._tessellation.hexagon_radius / sqrt(3) \
+                        - slope * centre[0]
+            return intercept - slope * x
+
+    def pout_given_p1(self, p1):
+        """
+            Computes the probability of going out of the region in `self._dt` seconds, given an initial position p1
+        :param p1: The initial position
+        :return: The probability of going out of the region
+        """
+        # 1) Find the diffusivity of the particle
+        for i in self._region_indices:
+            if self.is_in_cell(i, p1):
+                cell_index = i
+        try:
+            D = self._final_diffusivities[cell_index]
+        except KeyError:
+            self.vprint(1, f"KeyError. p1 is contained in no cell of the region.")
+
+        # 2) Compute the probability
+        I_array = []
+        for i in self._region_indices:
+            xmin, xmax = self.find_xmin_xmax(i)
+            Ii = dblquad(
+                lambda x, y: exp(-((x - p1[0]) ** 2 + (y - p1[1]) ** 2) / (4 * D * self._dt)) / (4 * pi * D * self._dt),
+                xmin, xmax, lambda x: self.ymin(i, x), lambda x: self.ymax(i, x))
+            I_array.append(Ii)
+        I = sum(I_array)
+        return 1 - I
+
+    def corrected_poff_array(self, frame_index):
+        """
+            Computes the corrected poff* array of the points in frame `frame_index` using numerical integration
+        :param frame_index: The index of the concerned frame
+        :return: array of exit probabilities
+        """
+        r_total = []
+        t_total = []
+        for j in self._region_indices:
+            cell = self._cells[j]
+            r = cell.r  # the recorded positions in cell
+            t = cell.t  # the recorded times in cell
+            r_total.extend(r)
+            t_total.extend(t)
+        r_total = np.array(r_total)  # r_total contains all the position in the region
+        t_total = np.array(t_total)  # t_total contains the corresponding times in the same order
+        # List of times corresponding to frames:
+        times = np.arange(min(t_total), max(t_total + self._dt / 100.), self._dt)
+        # Build lists of frames corresponding to times. A frame is an array of positions:
+        frames = self.rt_to_frames(r_total, t_total, times)
+        positions = frames[frame_index]
+
+        corrected_poff_array = []
+        for p1 in positions:
+            corrected_poff = 1 - (1 - self._parent_p_off) * (1 - self.pout_given_p1(p1))
+            corrected_poff_array.append(corrected_poff)
+
+        return corrected_poff_array
 
     # Other helper functions #
     def particle_count(self):
@@ -696,7 +1235,7 @@ class NonTrackingInferrerRegion(JobStep):
         # List of times corresponding to frames:
         times = np.arange(min(t_total), max(t_total + self._workspace._dt / 100.), self._workspace._dt)
 
-        # Step 2: Compute the particle number
+        # Step 2: Compute the particle number matrix
         particle_number = np.zeros((len(index), len(times)))
         print(f"region_indices={self._region_indices}")
         for j in self._region_indices:
@@ -708,6 +1247,25 @@ class NonTrackingInferrerRegion(JobStep):
             particle_number[j, :] = N_j
 
         return particle_number
+
+    def p_m(self, x, Delta, N):
+        '''Poissonian probability for x particles to appear between frames given Delta=M-N
+        and blinking parameters mu_on and mu_off. Consult the article for reference'''
+        mu_off = N * self._local_p_off
+        return (self._region_mu_on * mu_off) ** (x - Delta / 2.) / (
+            g(x + 1.) * g(x + 1. - Delta) * iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
+
+    def lnp_m(self, x, Delta, N):
+        """
+            The logarithm of `p_m`
+        :param x: The value of which we want to evaluate the probability
+        :param Delta: The observed particle number difference
+        :param N: The number of particles in the first frame
+        :return:
+        """
+        mu_off = N * self._local_p_off
+        return log(self._region_mu_on * mu_off) * (x - Delta / 2.) - lng(x + 1.) - lng(x + 1. - Delta) \
+               - log(iv(Delta, 2 * sqrt(self._region_mu_on * mu_off)))
 
     def lnp_ij(self, dr, frame_index):
         """
@@ -728,11 +1286,13 @@ class NonTrackingInferrerRegion(JobStep):
             else:
                 raise ValueError("distribution not supported. Suggestion: Use 'gaussian'. ")
         except ZeroDivisionError:
-            raise ZeroDivisionError("The optimizer somehow tested 0 diffusivity --> ZeroDivisionError")
+            raise ZeroDivisionError("Cannot have 0 diffusivity --> ZeroDivisionError")
         lnp[lnp < self._workspace._minlnL] = self._workspace._minlnL  # avoid numerical underflow
         cutoff = True  # cut off low probabilities
         if cutoff is True:
-            lnp[lnp < -10] = self._workspace._minlnL
+            lnp[lnp < self._workspace._cutoff_log_threshold] = self._workspace._minlnL
+        if self._workspace._method == 'MPA':
+            lnp[sqrt(dr[0] ** 2 + dr[1] ** 2) > self._workspace._MPA_max_distance_cutoff] = self._workspace._minlnL
         return lnp
 
     def minus_lq_minus_lnp_ij(self, dr, frame_index):
@@ -743,8 +1303,7 @@ class NonTrackingInferrerRegion(JobStep):
         :return: Matrix of log-probabilities for each distance or its -Lq(-.) transform
         """
         if self._workspace._useLq is True:
-            import pdb;
-            pdb.set_trace()
+            # import pdb; pdb.set_trace()
             return -Lq(-self.lnp_ij(dr, frame_index), self._workspace._q)
         else:
             return self.lnp_ij(dr, frame_index)
@@ -781,7 +1340,7 @@ class NonTrackingInferrerRegion(JobStep):
         out[:N, :M] = lnp - log(LM[:N, :M])
         out[:N, M:] = -log(LM[:N, M:])
         out[N:, :M] = -log(LM[N:, :M])
-        out[N:, M:] = 2. * self._workspace._minlnL  # Note: Why not 0 ??
+        out[N:, M:] = 1. * self._workspace._minlnL  # Note: Why not 0 ?? To avoid underflow
         return out
 
     def build_diffusivity_drift_matrices(self, frame_index):
@@ -827,8 +1386,29 @@ class NonTrackingInferrerRegion(JobStep):
         return self._workspace._smoothing_factor * penalization
 
     def smoothing_prior_heuristic(self):
-        # TODO
-        raise ("Not supported yet")
+        """
+            This heuristic smoothing make use the dual graph of the tessellation.
+            Every two adjacent cells are connected by an edge.
+            To each of those edges we assign a value equal to the absolute value of the difference between the
+            diffusivities in the two cells.
+            This value is weighed by the inverse distance separating the two cell centers.
+            In the end, all weights are summed. This gives a measure of the amplitude of variations in the tessellation.
+            The unit of the obtained number is [D]/micron = micron/s
+        :return: float. The penalization
+        """
+        penalization = 0
+        index = self._workspace._cells_to_infer
+        for i in index:
+            sum_distances = sum(
+                [np.linalg.norm(self._workspace._tessellation.cell_centers[i] - self._workspace._tessellation.cell_centers[j]) for j in
+                 self._workspace.get_neighbours(i)])
+            for j in self._workspace.get_neighbours(i):
+                value = abs(self._working_diffusivities[i] - self._working_diffusivities[j])
+                weight = np.linalg.norm(
+                    self._workspace._tessellation.cell_centers[i] - self._workspace._tessellation.cell_centers[j]) / sum_distances
+                penalization += value * weight
+
+        return penalization
 
     def smoothed_posterior(self, D):
         """
@@ -843,6 +1423,12 @@ class NonTrackingInferrerRegion(JobStep):
         self._working_diffusivities = self._workspace._final_diffusivities  # the most up-to-date parameters
         self._working_drifts = self._workspace._final_drifts
         # Note: Perhaps we should check for a value 0 of the diffusivity. It could cause problems later
+        # assert D != 0 , "A zero diffusivity makes no sense from a physical point of view"
+        if self._workspace._correct_p_off is True:
+            self._local_p_off = self.compute_corrected_p_off()
+            self._workspace.vprint(3, f"pc={round(self._local_p_off, 3)}", end_="")
+        else:
+            self._local_p_off = self._workspace._p_off
         # scheme selector
         if self._workspace._inference_mode == 'D':
             if self._workspace._scheme == '1D':
@@ -876,9 +1462,15 @@ class NonTrackingInferrerRegion(JobStep):
         # smoothing selector
         if self._workspace._smoothing_factor == 0:
             posterior = mlnL
-        else:
+        elif self._workspace._smoothing == 'standard':
             posterior = mlnL + self.smoothing_prior()
+        elif self._workspace._smoothing == 'heuristic':
+            posterior = mlnL + self.smoothing_prior_heuristic()
+        else:
+            raise ValueError("smoothing paramter has non-admissible value. Suggestion: choose 'standard' or 'heuristic'")
         self._workspace.vprint(3, f"{posterior}")
+        if posterior is np.nan:
+            raise FunctionEvaluation()
 
         self.optimizer_first_iteration = False
         # import pdb; pdb.set_trace()
@@ -887,13 +1479,79 @@ class NonTrackingInferrerRegion(JobStep):
     # Sum-product BP #
     def initialize_messages(self, N, M):
         """
-            Initializes the BP messages to zeros
+            Initializes the BP messages to zeros.
+            Attention: hji is in fact indexed in a i,j fashion, i.e $h_{j\to i}$ is in row i, column j
         :param N: particles number first frame
         :param M: particles number second frame
         :return: Two matrices, of the same size N x M containing only zeros
         """
         hij = zeros([N, M])
         hji = zeros([N, M])
+        return hij, hji
+
+    def compute_damping_factor(self, F, F_minus_one, F_minus_two, score):
+        """
+            Computes the dynamic damping factor ass explained in report
+        :param F: current energy
+        :param F_minus_one: previous energy
+        :param F_minus_two: previous previous energy
+        :param score: previous score
+        :return: current score and subsequent damping factor
+        """
+        oscillation_indicator = ((F - F_minus_one) * (F_minus_one - F_minus_two) < 0)
+        score = self._workspace._dynamic_damping_delta * (score + oscillation_indicator)
+        gamma = self._workspace._dynamic_damping_gamma_min + \
+                score * (1 - self._workspace._dynamic_damping_delta) * (1 - self._workspace._dynamic_damping_gamma_min)
+        return score, gamma
+
+    def extend_matrix_by_one_row_and_one_column(self, H):
+        """
+            Extends a matrix H in M(n x n) by one row and one column, thereby obtaining a matrix K in M(n+1 x n+1).
+                 _   H   _           _    K    _
+                | " " " " |         | " " " " . |
+                | " " " " |   -->   | " " " " . |
+                | " " " " |         | " " " " . |
+                |_" " " "_|         | " " " " . |
+                                    |_. . . . ._|
+        :param H: The matrix to be extended
+        :return: The extended matrix
+        """
+        assert (H.shape[0] == H.shape[1])  # H needs to be square
+        n = H.shape[0]
+        K = zeros((n + 1, n + 1))
+        # Create the 4 blocks of K
+        K[0:n, 0:n] = H
+        K[0:n, n] = H[:, n - 1]
+        K[n, 0:n] = H[n - 1, :]
+        K[n, n] = H[n - 1, n - 1]
+        return K
+
+    def initialize_messages_in_a_smart_way(self, N, M, n_on, n_off, frame_index):
+        """
+            Initializes the messages either at a fixed starting value or -if required- at the last converging value
+        :param N: Number of particles in the first frame
+        :param M: number of particles in the second frame
+        :param n_on: Number of appearing particles
+        :param n_off: Number of disappearing particles
+        :param frame_index: Index of the first frame of the current frame transition
+        :return: The initialized messages hij, hji
+        """
+        if (self.optimizer_first_iteration is False) and (self._hij_init_takeLast is True):
+            # In this case we just take the converged matrices from last call
+            hij = self.get_hij(frame_index, n_on)
+            hji = self.get_hji(frame_index, n_on)
+        elif (self.optimizer_first_iteration is True) and (self._hij_init_takeLast is True):
+            hij, hji = self.initialize_messages(n_on + N, n_off + M)
+            if self.get_hij(frame_index, n_on - 1) is not None:
+                try:
+                    hij = self.extend_matrix_by_one_row_and_one_column(self.get_hij(frame_index, n_on - 1))
+                    hji = self.extend_matrix_by_one_row_and_one_column(self.get_hji(frame_index, n_on - 1))
+                except:
+                    self.vprint(1, f"Warning: hij(n_on-1) re-use did not work.")
+                    # import pdb; pdb.set_trace()
+        else:
+            hij, hji = self.initialize_messages(n_on + N, n_off + M)
+        assert (hij.shape == hji.shape)
         return hij, hji
 
     def boolean_matrix(self, N):
@@ -940,14 +1598,20 @@ class NonTrackingInferrerRegion(JobStep):
         :param hji_old: Old right messages
         :return: The new messages (undamped)
         """
-        start = timeit.default_timer()
-        hij_new = -log(dot(exp(Q + self._workspace._temperature * hji_old),
-                           self.boolean_matrix(Q.shape[1]))) / self._workspace._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]),
-                           exp(Q + self._workspace._temperature * hij_old))) / self._workspace._temperature
-        self._workspace.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
-        # logdotexp update
-        # hij_new = -logdotexp(Q + self._temperature * hji_old, ... ) -  / self._temperature
+        try:
+            # naive version
+            start = timeit.default_timer()
+            hij_new = -log(dot(exp(Q + self._workspace._temperature * hji_old),
+                               self.boolean_matrix(Q.shape[1]))) / self._workspace._temperature
+            hji_new = -log(dot(self.boolean_matrix(Q.shape[0]),
+                               exp(Q + self._workspace._temperature * hij_old))) / self._workspace._temperature
+            self._workspace.vprint(4, f"sum-product time \t= {(timeit.default_timer() - start) * 1000} ms")
+        except RuntimeWarning:
+            # logdotexp version
+            hij_new = -logdot_exp_and_scalar(Q + self._workspace._temperature * hji_old, self.boolean_matrix(Q.shape[1])) \
+                      / self._workspace._temperature
+            hji_new = -logdot_scalar_and_exp(self.boolean_matrix(Q.shape[0]), Q + self._workspace._temperature * hij_old) \
+                      / self._workspace._temperature
         return hij_new, hji_new
 
     def sum_product_BP(self, Q, hij, hji):
@@ -964,26 +1628,52 @@ class NonTrackingInferrerRegion(JobStep):
         hij_old = hij
         hji_old = hji
         F_BP_old = self.bethe_free_energy(hij_old, hji_old, Q)
-        # Bethe = [F_BP_old]
+        # self.vprint(4,"")
+        F_minus_one = 0
+        F_minus_two = 0
+        score = 0
         self._workspace.vprint(4, "")
         for n in range(self._workspace._maxiter):
-            hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
-            hij = (1. - self._workspace._gamma) * hij_new + self._workspace._gamma * hij_old
-            hji = (1. - self._workspace._gamma) * hji_new + self._workspace._gamma * hji_old
+            try:
+                hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
+            except RuntimeWarning:
+                # import pdb; pdb.set_trace()
+                if n == 0:
+                    hij, hji = self.initialize_messages(hij.shape[0], hij.shape[0])
+                    hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
+            if self._workspace._dynamic_damping is True:
+                score, gamma = self.compute_damping_factor(F_BP_old, F_minus_one, F_minus_two, score)
+            else:
+                gamma = self._workspace._gamma
+            hij = (1. - gamma) * hij_new + gamma * hij_old
+            hji = (1. - gamma) * hji_new + gamma * hji_old
             # Stopping condition:
-            F_BP = self.bethe_free_energy(hij, hji, Q)
+            try:
+                F_BP = self.bethe_free_energy(hij, hji, Q)
+            except RuntimeWarning:
+                # import pdb; pdb.set_trace()
+                if n == 0:
+                    hij, hji = self.initialize_messages(hij.shape[0], hij.shape[0])
+                    hij_new, hji_new = self.sum_product_update_rule(Q, hij, hji)
+                    hij = (1. - gamma) * hij_new + gamma * hij_old
+                    hji = (1. - gamma) * hji_new + gamma * hji_old
+                    F_BP = self.bethe_free_energy(hij, hji, Q)
+            F_minus_two = F_minus_one
+            F_minus_one = F_BP_old
             self._workspace.vprint(4, f"n={n} \t\t Bethe={F_BP} \t\t ||hij_old-hij-new||={np.linalg.norm(hij_old - hij_new)}\r", end_="")
-            if abs(F_BP - F_BP_old) < self._workspace._epsilon:
-                self._workspace.vprint(4, "")
-                break
+            if F_BP is np.nan or F_BP == np.inf:
+                raise FunctionEvaluation(f"Bethe energy got value F_BP={F_BP}")
+            try:
+                if abs(F_BP - F_BP_old) < self._workspace._epsilon:
+                    self._workspace.vprint(4, "")
+                    break
+            except RuntimeWarning:
+                self._workspace.vprint(2,"Could not check if enerrgy converged")
+                #import pdb; pdb.set_trace()
             # Update old values of energy and messages:
             F_BP_old = F_BP
             hij_old = hij
             hji_old = hji
-            # Bethe.append(F_BP)
-        # fig = plt.figure()
-        # plt.plot(Bethe)
-        # plt.show()
         return F_BP, hij, hji, n  # shall we store n somewhere and send it back to the user in some sort of diagnosis object ?
 
     def sum_product_energy(self, dr, frame_index, n_on, n_off, N, M):
@@ -1009,19 +1699,66 @@ class NonTrackingInferrerRegion(JobStep):
                 hji = self.get_hji(frame_index, n_on)
             else:
                 hij, hji = self.initialize_messages(n_on + N, n_off + M)
-            assert (hij.shape == hji.shape)
+            try:
+                assert (hij.shape == hji.shape)
+            except AttributeError:
+                # This error can happen when hij gets None from the get_hij function
+                hij, hji = self.initialize_messages(n_on + N, n_off + M)
             Q = self.Q_ij(n_off, n_on, dr, frame_index)
-            F_BP, hij, hji, n = self.sum_product_BP(Q, hij, hji)
+            try:
+                F_BP, hij, hji, n = self.sum_product_BP(Q, hij, hji)
+            except RuntimeWarning:
+                n = 0
+                F_BP = np.nan
+                # import pdb; pdb.set_trace()
+                F_BP, hij, hji, n = self.sum_product_BP(Q, hij, hji)
+                raise FunctionEvaluation(f"Runtime Warning happened in BP. Stopping the BP")
             self.set_hij(hij, frame_index, n_on)
             self.set_hji(hji, frame_index, n_on)
-            # if self._hij_init_takeLast:
-            #     TODO store hij
-            #     self._stored_hij[frame_index,n_on] = hij
-            #     raise ValueError("hij_init_takeLast not supported yet")
+            if n == self._workspace._maxiter - 1:
+                self._workspace.vprint(1, f"Warning: BP attained maxiter before converging.")
+                self.maxiter_attained_counter += 1
             if n == self._workspace._maxiter - 1:
                 self._workspace.vprint(1, f"Warning: BP attained maxiter before converging.")
         # print(f"n={n}") # the number of iterations
         return F_BP
+
+    def marginal_minusLogLikelihood_phantom(self, dr, frame_index):
+        """
+            Computed the marginal minus-likelihood for one frame transition with introduction of phantom particles
+        :param dr: the displacement vectors
+        :param frame_index: the index of the current frame
+        :return: the minus log-likelihood between frame frame_index and frame frame_index+1
+        """
+        # self._stored_hij[frame_index] = [None] * (M - max([0, int(Delta)]))
+        '''
+        mlnL = -logsumexp([log(self.p_m(n_on, delta, N)) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                           - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M) \
+                           for n_on in range(max([0, int(delta)]), int(M))])  # Why use lng ?
+        '''
+        M = np.sum(self._particle_count[self._region_indices, frame_index + 1]).astype(int)
+        N = np.sum(self._particle_count[self._region_indices, frame_index]).astype(int)
+        delta = M - N
+        if self._cutoff_low_p_non is False:
+            mlnL = -logsumexp([log(self.p_m(n_on, delta, N)) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                               - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M) \
+                               for n_on in range(max([0, int(delta)]), int(M))])
+        else:
+            self.vprint(4, f"M = {M} \t N = {N} \t delta = {delta}")
+            noff_array = []
+            for n_on in range(max([0, int(delta)]), int(M)):
+                # import pdb; pdb.set_trace()
+                p = self.lnp_m(n_on, delta, N)
+                if p == np.inf or p == -np.inf or p == np.nan:
+                    raise (f"Numerical Error, p={p}")
+                self.vprint(4, f"n_on={n_on} \t p={p}")
+                if p > self._cutoff_log_threshold and self._cutoff_low_p_non is True:
+                    val = self.lnp_m(n_on, delta, N) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                          - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M)
+                    # self.vprint(4,f"lnL_non={n_on} = {val}")
+                    noff_array.append(val)
+            mlnL = -logsumexp(noff_array)
+        return mlnL
 
     def marginal_minusLogLikelihood(self, dr, frame_index):
         """
@@ -1057,12 +1794,12 @@ class NonTrackingInferrerRegion(JobStep):
             noff_array = []
             for n_on in range(max([0, int(delta)]), int(M)):
                 # import pdb; pdb.set_trace()
-                p = self._workspace.lnp_m(n_on, delta, N)
+                p = self.lnp_m(n_on, delta, N)
                 if p == np.inf or p == -np.inf or p == np.nan:
                     raise (f"Numerical Error, p={p}")
                 self._workspace.vprint(4, f"n_on={n_on} \t p={p}")
                 if p > -10:
-                    val = self._workspace.lnp_m(n_on, delta, N) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
+                    val = self.lnp_m(n_on, delta, N) + lng(M + 1 - n_on) - lng(M + 1) - lng(N + 1) \
                           - self.sum_product_energy(dr, frame_index, n_on, n_on - delta, N, M)
                     self._workspace.vprint(4, f"lnL_non={n_on} = {val}")
                     noff_array.append(val)
@@ -1149,7 +1886,7 @@ class NonTrackingInferrerRegion(JobStep):
         if self._workspace._optimizer == 'NM':
             if self._workspace._inference_mode == 'D':
                 fit = minimize(self.smoothed_posterior, x0=D, method='Nelder-Mead', tol=self._workspace._tol,
-                               options={'disp': False})
+                               options={'disp': False, 'maxfev': 50, 'xatol': 1e-2})
             elif self._workspace._inference_mode == 'DD':
                 start = np.hstack((D, d))
                 fit = minimize(self.smoothed_posterior, x0=start, method='Nelder-Mead', tol=self._workspace._tol,
@@ -1204,16 +1941,15 @@ class NonTrackingInferrerRegion(JobStep):
 
 
 class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
-    '''
-    def __init__(self, parentAttributes, index_to_infer, region_indices):
-        super(nonTrackingInferrerRegionBPchemPotMezard, self).__init__(parentAttributes, index_to_infer, region_indices)
-    '''
+    """
+        Implements the chemical potential solution with the Mezard formulation
+    """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + exp(-self._chemPot_gamma)) / self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
-                       + exp(-self._chemPot_gamma)) / self._temperature
+        hij_new = -log(dot(exp(Q + self._workspace._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + exp(-self._workspace._chemPot_gamma)) / self._workspace._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._workspace._temperature * hij_old)) \
+                       + exp(-self._workspace._chemPot_gamma)) / self._workspace._temperature
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -1239,24 +1975,27 @@ class NonTrackingInferrerRegionBPchemPotMezard(NonTrackingInferrerRegion):
 
         # logsumexp version, no constant term
         # gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
-        term1_bis = + sum(np.logaddexp(0, Q + self._temperature * hij + self._temperature * hji))
+        term1_bis = + sum(np.logaddexp(0, Q + self._workspace._temperature * hij + self._workspace._temperature * hji))
         term2_bis = - sum(
-            logsumexp(np.hstack((Q + self._temperature * hji, -ones((Q.shape[0], 1)) * self._chemPot_gamma)), axis=1))
+            logsumexp(np.hstack((Q + self._workspace._temperature * hji, -ones((Q.shape[0], 1)) * self._workspace._chemPot_gamma)), axis=1))
         term3_bis = - sum(
-            logsumexp(np.vstack((Q + self._temperature * hij, -ones((1, Q.shape[1])) * self._chemPot_gamma)), axis=0))
-        term4_bis = - sum(Q.shape) * self._chemPot_gamma
+            logsumexp(np.vstack((Q + self._workspace._temperature * hij, -ones((1, Q.shape[1])) * self._workspace._chemPot_gamma)), axis=0))
+        term4_bis = - sum(Q.shape) * self._workspace._chemPot_gamma
         logsumexp_energy = term1_bis + term2_bis + term3_bis + term4_bis
 
-        return logsumexp_energy / self._temperature
+        return logsumexp_energy / self._workspace._temperature
 
 
 class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
+    """
+        Implements the chemical potential solution with the Chertkov formulation
+    """
 
     def sum_product_update_rule(self, Q, hij_old, hji_old):
-        hij_new = -log(dot(exp(Q + self._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
-                       + exp(-self._chemPot_mu)) / self._temperature
-        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._temperature * hij_old)) \
-                       + exp(-self._chemPot_mu)) / self._temperature
+        hij_new = -log(dot(exp(Q + self._workspace._temperature * hji_old), self.boolean_matrix(Q.shape[1])) \
+                       + exp(-self._workspace._chemPot_mu)) / self._workspace._temperature
+        hji_new = -log(dot(self.boolean_matrix(Q.shape[0]), exp(Q + self._workspace._temperature * hij_old)) \
+                       + exp(-self._workspace._chemPot_mu)) / self._workspace._temperature
         return hij_new, hji_new
 
     def bethe_free_energy(self, hij, hji, Q):
@@ -1278,14 +2017,14 @@ class NonTrackingInferrerRegionBPchemPotChertkov(NonTrackingInferrerRegion):
 
         # logsumexp version, no constant term
         # gamma_matrix_ = ones(Q.shape)*self._chemPot_gamma
-        term1_bis = + sum(np.logaddexp(0, Q + self._temperature * hij + self._temperature * hji))
+        term1_bis = + sum(np.logaddexp(0, Q + self._workspace._temperature * hij + self._workspace._temperature * hji))
         term2_bis = - sum(
-            logsumexp(np.hstack((Q + self._temperature * hji, -ones((Q.shape[0], 1)) * self._chemPot_mu)), axis=1))
+            logsumexp(np.hstack((Q + self._workspace._temperature * hji, -ones((Q.shape[0], 1)) * self._workspace._chemPot_mu)), axis=1))
         term3_bis = - sum(
-            logsumexp(np.vstack((Q + self._temperature * hij, -ones((1, Q.shape[1])) * self._chemPot_mu)), axis=0))
+            logsumexp(np.vstack((Q + self._workspace._temperature * hij, -ones((1, Q.shape[1])) * self._workspace._chemPot_mu)), axis=0))
         logsumexp_energy = term1_bis + term2_bis + term3_bis
 
-        return logsumexp_energy / self._temperature
+        return logsumexp_energy / self._workspace._temperature
 
 
 class NonTrackingInferrerRegionBPphimu(NonTrackingInferrerRegion):
